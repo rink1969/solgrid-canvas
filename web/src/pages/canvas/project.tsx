@@ -338,6 +338,8 @@ function InfiniteCanvasPage() {
 
     const nodesRef = useRef(nodes);
     const connectionsRef = useRef(connections);
+    // 远端（SSE/Agent）刷新文档时置位，跳过随之触发的本地回写
+    const applyingRemoteRef = useRef(false);
     const selectedNodeIdsRef = useRef(selectedNodeIds);
     const viewportRef = useRef(viewport);
     const focusAnimRef = useRef<number | null>(null);
@@ -635,9 +637,25 @@ function InfiniteCanvasPage() {
     }, [activeChatId, backgroundMode, chatSessions, connections, createHistoryEntry, nodes, projectLoaded, showImageInfo]);
 
     useEffect(() => {
-        if (!projectLoaded || historyPausedRef.current) return;
+        if (!projectLoaded) return;
+        if (applyingRemoteRef.current) {
+            applyingRemoteRef.current = false;
+            return;
+        }
+        if (historyPausedRef.current) return;
         updateProject(projectId, { nodes, connections, chatSessions, activeChatId, backgroundMode, showImageInfo });
     }, [activeChatId, backgroundMode, chatSessions, connections, nodes, projectId, projectLoaded, showImageInfo, updateProject]);
+
+    // 远端改动（Agent / 另一个标签页）会先落到 store，这里同步到画布本地状态，免手动刷新
+    useEffect(() => {
+        if (!projectLoaded || !currentProject) return;
+        if (isNodeDragging || isNodeResizing) return;
+        if (currentProject.nodes === nodesRef.current && currentProject.connections === connectionsRef.current) return;
+        applyingRemoteRef.current = true;
+        setNodes(currentProject.nodes);
+        setConnections(currentProject.connections);
+        setSelectedNodeIds((prev) => new Set([...prev].filter((id) => currentProject.nodes.some((node) => node.id === id))));
+    }, [currentProject, projectLoaded, isNodeDragging, isNodeResizing]);
 
     useEffect(() => {
         if (!dialogNodeId) setNodeImageSettingsOpen(false);
