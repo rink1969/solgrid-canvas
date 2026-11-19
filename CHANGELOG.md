@@ -33,7 +33,7 @@
 + [新增] MCP server（stdio，零依赖）：把画布暴露给本地 Agent——读项目/节点、批量改画布、本机文件导入、自动布点、发起生成、等待结果、取消。
 + [新增] 产物布点引擎：图片一列、文本一列，从锚点右侧自动排布并避让已有节点，Agent 不需要自己算坐标。
 + [新增] 生成审批：Agent 发起生成时画布弹出确认框，用户点「允许本次生成」才会入队；拒绝或超时不产生费用。
-+ [新增] `solgrid-canvas` CLI：`daemon` / `mcp` / `doctor` / `install --agent codex|claude|dsh`，安装时注册 MCP 并安装技能包。
++ [新增] `solgrid-canvas` CLI：`daemon` / `mcp` / `doctor` / `install --agent codex|claude|dsh`，安装时注册 MCP 并安装技能包；DSH 会直接写入 profile 的 `cordis.patch.yml`（自动备份）而不是只打印 JSON。
 + [新增] 音频生成接入 solgrid：节点可选平台音频模型（minimax t2a_v2 / elevenlabs text-to-speech / stability 与 elevenlabs 的音效与音乐），音频设置里的音色/格式/语速会映射到对应契约，产物（hex/base64/URL 三种形状）落 `assets/`。
 + [调整] 文本节点提示"暂未接入 solgrid"；移除 `/image`、`/video` 两个独立工作台页面与顶部导航入口。
 

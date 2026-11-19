@@ -70,8 +70,35 @@ function installSkill() {
     return target;
 }
 
+// DSH 的 MCP 由内置 mcp-manager 管理：写 profile 的 cordis.patch.yml 才会生效
+function installDsh() {
+    const profileDir = path.join(os.homedir(), ".dsh", "profiles", process.env.DSH_PROFILE || "desktop");
+    const patchFile = path.join(profileDir, "cordis.patch.yml");
+    if (!fs.existsSync(patchFile)) return { ok: false, message: `找不到 DSH 配置：${patchFile}（确认 DSH 已安装/启动过）` };
+
+    const current = fs.readFileSync(patchFile, "utf8");
+    if (current.includes("solgrid_canvas")) return { ok: true, message: `DSH 配置里已经有 solgrid_canvas：${patchFile}`, changed: false };
+
+    const block = `
+# solgrid-canvas MCP（由 solgrid-canvas install 写入）
+- id: mcp-manager
+  name: "@deepseek-ai/dsh-mcp-manager"
+  config:
+    servers:
+      solgrid_canvas:
+        transport: stdio
+        command: '${process.execPath}'
+        args: ['${MCP}']
+        enabled: true
+`;
+    const backup = `${patchFile}.bak-${Date.now()}`;
+    fs.copyFileSync(patchFile, backup);
+    const next = `${current.trimEnd()}\n${block}`;
+    fs.writeFileSync(patchFile, next);
+    return { ok: true, message: `已写入 DSH 配置：${patchFile}（备份：${path.basename(backup)}），重启 DSH 后生效`, changed: true };
+}
+
 function installAgent(agent) {
-    const mcpCommand = ["mcp"];
     if (agent === "codex") {
         log("注册 Codex MCP…");
         run("codex", ["mcp", "add", "solgrid-canvas", "--", process.execPath, MCP, ...mcpCommand]);
@@ -79,8 +106,9 @@ function installAgent(agent) {
         log("注册 Claude Code MCP…");
         run("claude", ["mcp", "add", "--scope", "user", "solgrid-canvas", "--", process.execPath, MCP, ...mcpCommand]);
     } else if (agent === "dsh") {
-        log("DSH：在 DSH 的 MCP 连接器里添加以下 stdio 服务：");
-        log(JSON.stringify({ name: "solgrid-canvas", command: process.execPath, args: [MCP, ...mcpCommand] }, null, 2));
+        const result = installDsh();
+        log(result.ok ? `✓ ${result.message}` : `✗ ${result.message}`);
+        if (!result.ok) return 1;
     } else {
         log("用法：solgrid-canvas install --agent codex|claude|dsh");
         return 1;
