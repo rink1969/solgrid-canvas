@@ -35,6 +35,8 @@ export function CanvasPromptChipInput({ value, references, onChange, onSubmit, c
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const editorRef = useRef<HTMLDivElement>(null);
     const composingRef = useRef(false);
+    // 输入法组字期间不要重建 DOM，也不显示 placeholder（否则会和候选文字叠在一起）
+    const [composing, setComposing] = useState(false);
     // Track the last value emitted to the parent. An identical focused value is this component's own echo,
     // so skip rebuilding to preserve the caret and IME. Rebuild external changes even while focused.
     const lastEmittedRef = useRef(value);
@@ -59,6 +61,7 @@ export function CanvasPromptChipInput({ value, references, onChange, onSubmit, c
     useEffect(() => {
         const editor = editorRef.current;
         if (!editor) return;
+        if (composingRef.current) return;
         if (document.activeElement === editor && value === lastEmittedRef.current) return;
         editor.textContent = "";
         tokens.forEach((token) => {
@@ -124,7 +127,7 @@ export function CanvasPromptChipInput({ value, references, onChange, onSubmit, c
         emit(serializeEditor(editor));
     };
 
-    const showPlaceholder = !value.trim();
+    const showPlaceholder = !composing && !value.trim();
 
     return (
         <div className="relative w-full">
@@ -146,9 +149,11 @@ export function CanvasPromptChipInput({ value, references, onChange, onSubmit, c
                 }}
                 onCompositionStart={() => {
                     composingRef.current = true;
+                    setComposing(true);
                 }}
                 onCompositionEnd={() => {
                     composingRef.current = false;
+                    setComposing(false);
                     syncFromEditor();
                 }}
                 onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
