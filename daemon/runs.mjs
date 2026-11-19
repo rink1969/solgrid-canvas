@@ -38,23 +38,69 @@ export function createRunEngine({ store, gateway, projectsDir, bodyDir, broadcas
         broadcast?.({ type: "run.updated", run });
     }
 
-    // 把结果写回画布文档：刷新页面后节点也能显示结果（不再停留在 loading）
-    function patchNode(run, patch) {
-        if (!run.nodeId || !docStore) return;
+    // 把结果写回画布文档（daemon 是唯一写入方）：刷新页面后节点也能显示结果
+    function applyDocOps(run, ops) {
+        if (!docStore || !ops.length) return;
         try {
-            // patch 是节点 metadata 的字段（content/storageKey/status…），不是节点顶层字段
-            const op = { type: "update_node", id: run.nodeId, patch: { metadata: patch } };
-            const result = applyOps(docStore, run.projectId, [op]);
-            opLog?.append(run.projectId, [op], "daemon");
-            broadcast?.({ type: "project.ops", id: run.projectId, rev: result.rev, ops: 1, clientId: "daemon" });
+            const result = applyOps(docStore, run.projectId, ops);
+            opLog?.append(run.projectId, ops, "daemon");
+            broadcast?.({ type: "project.ops", id: run.projectId, rev: result.rev, ops: ops.length, clientId: "daemon" });
         } catch (error) {
-            log(`run ${run.id} 回填节点失败：${error.message}`);
+            log(`run ${run.id} 回填画布失败：${error.message}`);
         }
+    }
+
+    function nodeMetadata(run, output) {
+        const size = output.mime?.startsWith("image/") ? imageSizeOf(run, output) : null;
+        return {
+            content: output.url,
+            storageKey: output.storageKey,
+            status: "success",
+            bytes: output.bytes,
+            mimeType: output.mime,
+            ...(size ? { naturalWidth: size.width, naturalHeight: size.height } : {}),
+            prompt: run.body?.prompt,
+            provider: run.provider,
+            endpoint: run.endpoint,
+            errorDetails: undefined,
+        };
+    }
+
+    // 第一份产物回填原节点；多余的产物（数量 N > 1）在右侧按列新增节点，刷新后也在
+    function writeResultNodes(run, outputs) {
+        if (!run.nodeId || !outputs.length) return;
+        const ops = [{ type: "update_node", id: run.nodeId, patch: { metadata: nodeMetadata(run, outputs[0]) } }];
+        const extras = outputs.slice(1);
+        if (extras.length) {
+            const project = docStore?.readProject(run.projectId);
+            const source = project?.nodes?.find((node) => node.id === run.nodeId);
+            const baseX = source ? source.position.x + source.width + 320 : 0;
+            const baseY = source ? source.position.y : 0;
+            extras.forEach((output, index) => {
+                const size = output.mime?.startsWith("image/") ? imageSizeOf(run, output) : null;
+                const width = size ? Math.min(480, Math.max(160, Math.round((size.width / size.height) * 320))) : 320;
+                const height = size ? 320 : 320;
+                const type = output.mime?.startsWith("video/") ? "video" : output.mime?.startsWith("audio/") ? "audio" : "image";
+                ops.push({
+                    type: "add_node",
+                    node: {
+                        id: `run-${run.id}-${index + 1}`,
+                        type,
+                        title: (run.body?.prompt || "生成结果").slice(0, 24),
+                        position: { x: baseX, y: baseY + index * (height + 32) },
+                        width,
+                        height,
+                        metadata: nodeMetadata(run, output),
+                    },
+                });
+            });
+        }
+        applyDocOps(run, ops);
     }
 
     function fail(run, message, status = "failed") {
         const updated = store.update(run.id, { status, error: message, finishedAt: new Date().toISOString() });
-        patchNode(run, { status: "error", errorDetails: message });
+        if (run.nodeId) applyDocOps(run, [{ type: "update_node", id: run.nodeId, patch: { metadata: { status: "error", errorDetails: message } } }]);
         log(`run ${run.id} ${status}: ${message}`);
         emit(updated);
         return updated;
@@ -158,22 +204,7 @@ export function createRunEngine({ store, gateway, projectsDir, bodyDir, broadcas
                     billingStatus,
                     finishedAt: new Date().toISOString(),
                 });
-                const first = outputs[0];
-                if (first) {
-                    const size = first.mime?.startsWith("image/") ? imageSizeOf(run, first) : null;
-                    patchNode(run, {
-                        content: first.url,
-                        storageKey: first.storageKey,
-                        status: "success",
-                        bytes: first.bytes,
-                        mimeType: first.mime,
-                        ...(size ? { naturalWidth: size.width, naturalHeight: size.height } : {}),
-                        prompt: run.body?.prompt,
-                        provider: run.provider,
-                        endpoint: run.endpoint,
-                        errorDetails: undefined,
-                    });
-                }
+                writeResultNodes(run, outputs);
                 log(`run ${run.id} completed（${outputs.length} 个产物，cost=${cost ?? "?"}）`);
                 emit(updated);
                 return updated;

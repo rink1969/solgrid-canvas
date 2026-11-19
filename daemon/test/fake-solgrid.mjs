@@ -42,7 +42,7 @@ if (command === "run") {
     // 把 daemon 生成的请求体留档，冒烟测试据此校验 family 映射
     const inputFile = flag("-f");
     if (inputFile && fs.existsSync(inputFile)) fs.copyFileSync(inputFile, path.join(stateDir, "bodies", `${id}.json`));
-    writeRun({ id, polls: 0, key, endpoint: flag("-e") });
+    writeRun({ id, polls: 0, key, endpoint: flag("-e"), bodyFile: inputFile && fs.existsSync(inputFile) ? `${id}.json` : null });
     if (key) fs.writeFileSync(path.join(stateDir, "keys", key), id);
     emit({ id, status: "READY", idempotencyKey: key });
 }
@@ -62,12 +62,21 @@ if (command === "runs" && argv[1] === "get") {
     writeRun(run);
     if (run.polls <= pollLimit) emit({ id, status: "RUNNING", cost: null });
     const isAudio = /t2a|text-to-speech|stable-audio/.test(String(run.endpoint || ""));
+    let count = 1;
+    if (run.bodyFile) {
+        try {
+            const body = JSON.parse(fs.readFileSync(path.join(stateDir, "bodies", run.bodyFile), "utf8"));
+            count = Math.max(1, Math.min(6, Number(body?.parameters?.n) || 1));
+        } catch {
+            count = 1;
+        }
+    }
     emit({
         id,
         status: "COMPLETED",
         cost: 3.9,
         billingStatus: "SETTLED",
-        output: isAudio ? { audio: `49443303${"00".repeat(400)}` } : { images: [{ base64: TINY_PNG, mime: "image/png" }] },
+        output: isAudio ? { audio: `49443303${"00".repeat(400)}` } : { images: Array.from({ length: count }, () => ({ base64: TINY_PNG, mime: "image/png" })) },
     });
 }
 

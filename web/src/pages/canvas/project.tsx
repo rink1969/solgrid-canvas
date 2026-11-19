@@ -6,7 +6,8 @@ import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
 
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
-import { cancelRun, createRun, waitRun } from "@/services/api/solgrid";
+import { cancelRun, createRun, listRuns, waitRun } from "@/services/api/solgrid";
+import { daemonApi } from "@/services/api/daemon";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { createVideoGenerationTask, isVideoTaskFailed, storeGeneratedVideo, waitForVideoGenerationTask } from "@/services/api/video";
 import { defaultConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
@@ -147,6 +148,36 @@ function applyGeneratedVideo(item: CanvasNodeData, video: UploadedFile, extra: C
 }
 
 // 用函数而不是内联比较，避免 TypeScript 在提前 return 后把 mode 收窄成 text|audio
+// daemon 是生成结果的唯一写入方：用它返回的文档覆盖"生成中/新产出"的节点，其余本地编辑保留
+function mergeGeneratedNodes(previous: CanvasNodeData[], fresh: CanvasNodeData[]) {
+    const previousById = new Map(previous.map((node) => [node.id, node]));
+    const freshIds = new Set(fresh.map((node) => node.id));
+    const merged = fresh.map((node) => {
+        const local = previousById.get(node.id);
+        if (!local) return node;
+        return local.metadata?.status === NODE_STATUS_LOADING ? node : local;
+    });
+    for (const node of previous) {
+        if (!freshIds.has(node.id)) merged.push(node);
+    }
+    return merged;
+}
+
+// 页面刷新后：哪些 loading 节点其实还有 daemon 里的活跃 run
+async function pendingSolgridNodeIds(projectId: string, nodes: CanvasNodeData[]) {
+    const loading = nodes
+        .filter((node) => node.metadata?.status === NODE_STATUS_LOADING && (node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio))
+        .map((node) => node.id);
+    if (!loading.length) return new Set<string>();
+    try {
+        const runs = await listRuns(projectId, 100);
+        const active = new Set(runs.filter((run) => ["queued", "submitting", "running"].includes(run.status)).map((run) => run.nodeId).filter(Boolean) as string[]);
+        return new Set(loading.filter((id) => active.has(id)));
+    } catch {
+        return new Set<string>();
+    }
+}
+
 function isSolgridGenerationMode(mode: CanvasNodeGenerationMode) {
     return mode === "image" || mode === "video" || mode === "audio";
 }
@@ -315,6 +346,8 @@ function InfiniteCanvasPage() {
     const generationRequestsRef = useRef(new Map<string, CanvasGenerationRequest>());
     // solgrid 生成：节点 -> runId，停止时要取消远端（否则平台继续计费）
     const solgridRunIdsRef = useRef(new Map<string, string>());
+    // 刷新后仍在跑的节点：等 daemon 回填结果
+    const pendingLoadingIdsRef = useRef<Set<string>>(new Set());
     const videoPollIdsRef = useRef(new Set<string>());
 
     const createHistoryEntry = useCallback(
@@ -486,7 +519,9 @@ function InfiniteCanvasPage() {
         }
 
         const restore = async () => {
-            const restoredNodes = await hydrateCanvasImages(resetInterruptedGeneration(project.nodes));
+            const keepLoading = await pendingSolgridNodeIds(projectId, project.nodes);
+            pendingLoadingIdsRef.current = keepLoading;
+            const restoredNodes = await hydrateCanvasImages(resetInterruptedGeneration(project.nodes, keepLoading));
             const restoredSessions = await hydrateAssistantImages(project.chatSessions || []);
             setNodes(restoredNodes);
             setConnections(project.connections);
@@ -519,6 +554,36 @@ function InfiniteCanvasPage() {
         setActiveProjectId(projectId);
         return () => setActiveProjectId(null);
     }, [projectId]);
+
+    // 刷新时还有活跃 run：轮询文档，daemon 写回结果后自动显示，不必手动再刷
+    useEffect(() => {
+        if (!projectLoaded) return;
+        const loadingIds = [...pendingLoadingIdsRef.current];
+        if (!loadingIds.length) return;
+        let canceled = false;
+        let timer: ReturnType<typeof setInterval> | null = null;
+        const tick = async () => {
+            try {
+                const fresh = await daemonApi.getProject(projectId);
+                if (canceled) return;
+                setNodes((prev) => mergeGeneratedNodes(prev, fresh.nodes));
+                setConnections(fresh.connections);
+                const stillLoading = fresh.nodes.some((node) => loadingIds.includes(node.id) && node.metadata?.status === NODE_STATUS_LOADING);
+                if (!stillLoading) {
+                    pendingLoadingIdsRef.current = new Set();
+                    if (timer) clearInterval(timer);
+                }
+            } catch {
+                // daemon 不可用时保持原状，交给下一轮
+            }
+        };
+        timer = setInterval(() => void tick(), 2500);
+        void tick();
+        return () => {
+            canceled = true;
+            if (timer) clearInterval(timer);
+        };
+    }, [projectLoaded, projectId]);
 
     useEffect(() => {
         if (!projectLoaded) return;
@@ -2419,96 +2484,103 @@ function InfiniteCanvasPage() {
                 const outputs = final.outputs || [];
                 if (!outputs.length) throw new Error("平台没有返回产物");
                 const [output, ...extraOutputs] = outputs;
-
-                if (mode === "audio") {
-                    const audioMeta = await probeAudioMeta(output.url);
-                    setNodes((prev) =>
-                        prev.map((node) =>
-                            node.id === nodeId
-                                ? {
-                                      ...node,
-                                      metadata: {
-                                          ...node.metadata,
-                                          ...audioMetadata({ url: output.url, storageKey: output.storageKey, bytes: output.bytes, mimeType: output.mime || "audio/mpeg", durationMs: audioMeta.durationMs }),
-                                          prompt: context.prompt,
-                                          provider,
-                                          endpoint,
-                                          status: NODE_STATUS_SUCCESS,
-                                          errorDetails: undefined,
-                                      },
-                                  }
-                                : node,
-                        ),
-                    );
-                } else if (mode === "image") {
-                    const meta = await readImageMeta(output.url);
-                    setNodes((prev) =>
-                        prev.map((node) =>
-                            node.id === nodeId
-                                ? {
-                                      ...node,
-                                      metadata: {
-                                          ...node.metadata,
-                                          ...imageMetadata({ url: output.url, storageKey: output.storageKey, width: meta.width, height: meta.height, bytes: output.bytes, mimeType: output.mime }),
-                                          prompt: context.prompt,
-                                          provider,
-                                          endpoint,
-                                          status: NODE_STATUS_SUCCESS,
-                                          errorDetails: undefined,
-                                      },
-                                  }
-                                : node,
-                        ),
-                    );
+                // daemon 已经写回节点与多产物；优先用它返回的文档对齐，拉不到再走本地兜底
+                const fresh = await daemonApi.getProject(projectId).catch(() => null);
+                if (fresh) {
+                    setNodes((prev) => mergeGeneratedNodes(prev, fresh.nodes));
+                    setConnections(fresh.connections);
                 } else {
-                    const videoMeta = await probeVideoMeta(output.url);
-                    setNodes((prev) =>
-                        prev.map((node) =>
-                            node.id === nodeId
-                                ? {
-                                      ...node,
-                                      metadata: {
-                                          ...node.metadata,
-                                          ...videoMetadata({ url: output.url, storageKey: output.storageKey, bytes: output.bytes, mimeType: output.mime || "video/mp4", ...videoMeta }),
-                                          prompt: context.prompt,
-                                          provider,
-                                          endpoint,
-                                          status: NODE_STATUS_SUCCESS,
-                                          errorDetails: undefined,
-                                      },
-                                  }
-                                : node,
-                        ),
-                    );
-                }
-                // 数量 N > 1 时，其余产物建成右侧节点，避免"付了 N 份钱只拿到 1 份"
-                if (extraOutputs.length) {
-                    const created: CanvasNodeData[] = [];
-                    for (const [index, item] of extraOutputs.entries()) {
-                        let metadata;
-                        if (item.mime?.startsWith("video/")) {
-                            const meta = await probeVideoMeta(item.url);
-                            metadata = videoMetadata({ url: item.url, storageKey: item.storageKey, bytes: item.bytes, mimeType: item.mime, ...meta });
-                        } else if (item.mime?.startsWith("audio/")) {
-                            const meta = await probeAudioMeta(item.url);
-                            metadata = audioMetadata({ url: item.url, storageKey: item.storageKey, bytes: item.bytes, mimeType: item.mime, durationMs: meta.durationMs });
-                        } else {
-                            const meta = await readImageMeta(item.url);
-                            metadata = imageMetadata({ url: item.url, storageKey: item.storageKey, width: meta.width, height: meta.height, bytes: item.bytes, mimeType: item.mime });
-                        }
-                        const type = item.mime?.startsWith("video/") ? CanvasNodeType.Video : item.mime?.startsWith("audio/") ? CanvasNodeType.Audio : CanvasNodeType.Image;
-                        created.push(
-                            createCanvasNode(type, { x: sourceNode.position.x + sourceNode.width + 360 + index * 40, y: sourceNode.position.y + sourceNode.height / 2 + index * 360 }, {
-                                ...metadata,
-                                prompt: context.prompt,
-                                provider,
-                                endpoint,
-                            }),
+
+                    if (mode === "audio") {
+                        const audioMeta = await probeAudioMeta(output.url);
+                        setNodes((prev) =>
+                            prev.map((node) =>
+                                node.id === nodeId
+                                    ? {
+                                          ...node,
+                                          metadata: {
+                                              ...node.metadata,
+                                              ...audioMetadata({ url: output.url, storageKey: output.storageKey, bytes: output.bytes, mimeType: output.mime || "audio/mpeg", durationMs: audioMeta.durationMs }),
+                                              prompt: context.prompt,
+                                              provider,
+                                              endpoint,
+                                              status: NODE_STATUS_SUCCESS,
+                                              errorDetails: undefined,
+                                          },
+                                      }
+                                    : node,
+                            ),
+                        );
+                    } else if (mode === "image") {
+                        const meta = await readImageMeta(output.url);
+                        setNodes((prev) =>
+                            prev.map((node) =>
+                                node.id === nodeId
+                                    ? {
+                                          ...node,
+                                          metadata: {
+                                              ...node.metadata,
+                                              ...imageMetadata({ url: output.url, storageKey: output.storageKey, width: meta.width, height: meta.height, bytes: output.bytes, mimeType: output.mime }),
+                                              prompt: context.prompt,
+                                              provider,
+                                              endpoint,
+                                              status: NODE_STATUS_SUCCESS,
+                                              errorDetails: undefined,
+                                          },
+                                      }
+                                    : node,
+                            ),
+                        );
+                    } else {
+                        const videoMeta = await probeVideoMeta(output.url);
+                        setNodes((prev) =>
+                            prev.map((node) =>
+                                node.id === nodeId
+                                    ? {
+                                          ...node,
+                                          metadata: {
+                                              ...node.metadata,
+                                              ...videoMetadata({ url: output.url, storageKey: output.storageKey, bytes: output.bytes, mimeType: output.mime || "video/mp4", ...videoMeta }),
+                                              prompt: context.prompt,
+                                              provider,
+                                              endpoint,
+                                              status: NODE_STATUS_SUCCESS,
+                                              errorDetails: undefined,
+                                          },
+                                      }
+                                    : node,
+                            ),
                         );
                     }
-                    if (created.length) setNodes((prev) => [...prev, ...created]);
-                }
+                    // 数量 N > 1 时，其余产物建成右侧节点，避免"付了 N 份钱只拿到 1 份"
+                    if (extraOutputs.length) {
+                        const created: CanvasNodeData[] = [];
+                        for (const [index, item] of extraOutputs.entries()) {
+                            let metadata;
+                            if (item.mime?.startsWith("video/")) {
+                                const meta = await probeVideoMeta(item.url);
+                                metadata = videoMetadata({ url: item.url, storageKey: item.storageKey, bytes: item.bytes, mimeType: item.mime, ...meta });
+                            } else if (item.mime?.startsWith("audio/")) {
+                                const meta = await probeAudioMeta(item.url);
+                                metadata = audioMetadata({ url: item.url, storageKey: item.storageKey, bytes: item.bytes, mimeType: item.mime, durationMs: meta.durationMs });
+                            } else {
+                                const meta = await readImageMeta(item.url);
+                                metadata = imageMetadata({ url: item.url, storageKey: item.storageKey, width: meta.width, height: meta.height, bytes: item.bytes, mimeType: item.mime });
+                            }
+                            const type = item.mime?.startsWith("video/") ? CanvasNodeType.Video : item.mime?.startsWith("audio/") ? CanvasNodeType.Audio : CanvasNodeType.Image;
+                            created.push(
+                                createCanvasNode(type, { x: sourceNode.position.x + sourceNode.width + 360 + index * 40, y: sourceNode.position.y + sourceNode.height / 2 + index * 360 }, {
+                                    ...metadata,
+                                    prompt: context.prompt,
+                                    provider,
+                                    endpoint,
+                                }),
+                            );
+                        }
+                        if (created.length) setNodes((prev) => [...prev, ...created]);
+                    }
 
+                }
                 message.success(`生成完成${outputs.length > 1 ? `（${outputs.length} 个产物）` : ""}${typeof final.costSpark === "number" ? `（${final.costSpark} Spark）` : ""}`);
             } catch (error) {
                 if (isGenerationCanceled(error)) return;

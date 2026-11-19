@@ -237,6 +237,22 @@ try {
     check("音频 body 用 voice_setting", audioBody?.voice_setting?.voice_id === "female-shaonv" && audioBody?.audio_setting?.format === "mp3", JSON.stringify(audioBody).slice(0, 200));
     check("hex 音频落地为 mp3", audioFinished?.status === "completed" && String(audioFinished?.outputs?.[0]?.file || "").endsWith(".mp3"), JSON.stringify(audioFinished?.outputs));
 
+    // 数量 N > 1：daemon 应该把多出来的产物也建成节点
+    const multiRun = await fetch(`${BASE}/api/runs`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ projectId: "smokeproj", nodeId: "node1", provider: "alibaba", endpoint: "/v1/image/qwen-image-3.0", params: { prompt: "多图测试", count: 3, size: "1024x1024" } }),
+    }).then((r) => r.json());
+    for (let i = 0; i < 40; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        const payload = await fetch(`${BASE}/api/runs/${multiRun.run.id}`, { headers }).then((r) => r.json());
+        if (["completed", "failed", "uncertain", "stopped"].includes(payload.run?.status)) break;
+    }
+    const projectAfterMulti = await fetch(`${BASE}/api/projects/smokeproj`, { headers }).then((r) => r.json());
+    const imageNodes = projectAfterMulti.project.nodes.filter((node) => node.type === "image");
+    check("数量 N 多产物都落画布", imageNodes.length === 3, `image nodes=${imageNodes.length}`);
+    check("多产物都带 assetId", imageNodes.every((node) => String(node.metadata?.storageKey || "").startsWith("asset:smokeproj/")));
+
     // 列表与取消
     const list = await fetch(`${BASE}/api/runs?projectId=smokeproj`, { headers }).then((r) => r.json());
     check("run 列表", (list.runs?.length || 0) >= 2 && list.runs.some((item) => item.id === run.id));
