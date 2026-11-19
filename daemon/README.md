@@ -57,6 +57,8 @@ CANVAS_TOKEN=<daemon.json 里的 token>
 | GET | `/health` | 存活检查（免 token） |
 | GET | `/api/projects` | 项目列表（含完整文档） |
 | GET | `/api/projects/:id` | 单项目 |
+| POST | `/api/projects/:id/ops` | 增量 op（add_node / update_node / remove_nodes / add_edge / remove_edges / update_meta / move_nodes），带 `expectRev` |
+| GET | `/api/projects/:id/ops` | op 日志（最近 N 条） |
 | PUT | `/api/projects/:id` | 保存项目（body: `{project}`），返回 `rev` |
 | DELETE | `/api/projects/:id` | 删除项目目录 |
 | GET | `/api/events?client=<id>` | SSE：`project.updated` / `project.deleted` / `run.updated` |
@@ -65,9 +67,11 @@ CANVAS_TOKEN=<daemon.json 里的 token>
 | GET | `/api/tools?q=…` | `solgrid discover` 结果（缓存 24h） |
 | GET | `/api/tools/detail?provider=&endpoint=` | `solgrid inspect` 契约（缓存 24h） |
 | POST | `/api/runs` | 入队生成：`{projectId,nodeId?,provider,endpoint,params}`；`params` 是画布语义（prompt/size/references/seconds/resolution…），`params.rawBody` 可直接给请求体 |
-| GET | `/api/runs?projectId=` | run 列表（状态 / cost / 产物） |
+| GET | `/api/runs?projectId=` | run 列表摘要（不含 body） |
 | GET | `/api/runs/:id` | 单个 run |
 | POST | `/api/runs/:id/cancel` | 取消（可 stop 则 stop 远端） |
+| POST | `/api/runs/:id/retry` | 用同样参数重新入队 |
+| DELETE | `/api/runs/:id` | 删除记录 |
 
 所有 `/api/*` 都需要 `x-canvas-token`。写入时 **`data:` / `blob:` 地址会被剥离**（画布文档只允许 `assetId` / `storageKey`），资产层在 M1 接管。`blob:` 只在创建它的标签页存活，写进文档就是死链。
 

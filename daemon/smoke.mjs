@@ -86,6 +86,33 @@ try {
     check("读回节点完整", list.json.projects[0].nodes.length === 3 && list.json.projects[0].connections.length === 1);
     check("读回 rev", list.json.projects[0].rev === 1);
 
+    // ---- 增量 op ----
+    const before = await api("GET", "/api/projects/smoke1");
+    const beforeRev = before.json.project.rev;
+    const opsResult = await api("POST", "/api/projects/smoke1/ops", {
+        ops: [
+            { type: "add_node", node: { id: "n4", type: "text", title: "新节点", position: { x: 10, y: 600 }, width: 200, height: 100, metadata: { content: "op 新增" } } },
+            { type: "update_node", id: "n1", patch: { title: "改名后", metadata: { content: "一只狗" } } },
+            { type: "add_edge", edge: { id: "c2", fromNodeId: "n1", toNodeId: "n4" } },
+            { type: "update_meta", patch: { title: "op 改标题" } },
+        ],
+        expectRev: beforeRev,
+        origin: "agent",
+    });
+    check("op 批量应用", opsResult.status === 200 && opsResult.json.rev === beforeRev + 1, JSON.stringify(opsResult.json));
+    const afterOps = await api("GET", "/api/projects/smoke1");
+    check("op 结果落库", afterOps.json.project.nodes.length === 4 && afterOps.json.project.title === "op 改标题" && afterOps.json.project.nodes.find((n) => n.id === "n1").metadata.content === "一只狗", JSON.stringify(afterOps.json.project.title));
+    check("op 连线落库", afterOps.json.project.connections.length === 2);
+
+    const conflict = await api("POST", "/api/projects/smoke1/ops", { ops: [{ type: "update_meta", patch: { title: "冲突" } }], expectRev: 999 });
+    check("expectRev 不匹配返回冲突", conflict.status === 409 && conflict.json.error === "rev_conflict", JSON.stringify(conflict.json));
+
+    const opLog = await api("GET", "/api/projects/smoke1/ops");
+    check("op 日志可查", opLog.json.ops?.length === 4 && opLog.json.ops[0].origin === "agent", JSON.stringify(opLog.json).slice(0, 200));
+
+    const badOp = await api("POST", "/api/projects/smoke1/ops", { ops: [{ type: "unknown_op" }] });
+    check("未知 op 被拒", badOp.status === 400 && badOp.json.error === "invalid_op");
+
     // ---- 资产：上传 / 去重 / 读取 / Range ----
     const png = Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63600000020001e621bc330000000049454e44ae426082", "hex");
     const uploadAsset = async (buffer, mime) => {

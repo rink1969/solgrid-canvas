@@ -18,6 +18,18 @@ const TERMINAL = new Set(["COMPLETED", "FAILED", "BLOCKED", "TIMED_OUT", "STOPPE
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// 参数里可能夹带 data URL（参考图的本地副本），入库前替换掉，避免撑大 DB 和列表响应
+function sanitizeParams(value) {
+    if (typeof value === "string") return value.startsWith("data:") && value.length > 2000 ? "data:<omitted>" : value;
+    if (Array.isArray(value)) return value.map(sanitizeParams);
+    if (value && typeof value === "object") {
+        const next = {};
+        for (const [key, item] of Object.entries(value)) next[key] = sanitizeParams(item);
+        return next;
+    }
+    return value;
+}
+
 export function createRunEngine({ store, gateway, projectsDir, bodyDir, broadcast, log }) {
     let busy = false;
 
@@ -153,6 +165,8 @@ export function createRunEngine({ store, gateway, projectsDir, bodyDir, broadcas
         } catch (error) {
             return fail(run, error.message, "failed");
         }
+        // 留存实际发出去的请求体，失败排查/重试都用得上
+        store.update(run.id, { builtBody: prepared.body });
         const bodyPath = tempBodyPath(bodyDir, run.idempotencyKey);
         fs.writeFileSync(bodyPath, JSON.stringify(prepared.body));
         const submitting = store.update(run.id, { status: "submitting", startedAt: new Date().toISOString() });
@@ -215,7 +229,7 @@ export function createRunEngine({ store, gateway, projectsDir, bodyDir, broadcas
                 nodeId,
                 provider,
                 endpoint,
-                body,
+                body: sanitizeParams(body ?? {}),
                 idempotencyKey: crypto.randomUUID(),
             });
             emit(run);

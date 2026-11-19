@@ -31,18 +31,30 @@ async function request<T>(path: string, init: RequestOptions = {}): Promise<T> {
     return (await response.json()) as T;
 }
 
+export type CanvasOp =
+    | { type: "add_node"; node: unknown }
+    | { type: "update_node"; id: string; patch: unknown }
+    | { type: "remove_nodes"; ids: string[] }
+    | { type: "add_edge"; edge: unknown }
+    | { type: "remove_edges"; ids: string[] }
+    | { type: "update_meta"; patch: Record<string, unknown> }
+    | { type: "move_nodes"; ids: string[]; dx: number; dy: number };
+
 export const daemonApi = {
     listProjects: (): Promise<CanvasProject[]> => request<{ projects: CanvasProject[] }>("/projects").then((value) => value.projects),
     getProject: (id: string): Promise<CanvasProject> => request<{ project: CanvasProject }>(`/projects/${id}`).then((value) => value.project),
     putProject: (id: string, project: CanvasProject): Promise<{ rev: number }> =>
         request<{ rev: number }>(`/projects/${id}`, { method: "PUT", body: JSON.stringify({ project }) }),
     deleteProject: (id: string): Promise<{ ok: boolean }> => request<{ ok: boolean }>(`/projects/${id}`, { method: "DELETE" }),
+    postOps: (id: string, ops: CanvasOp[], expectRev?: number): Promise<{ rev: number }> =>
+        request<{ rev: number }>(`/projects/${id}/ops`, { method: "POST", body: JSON.stringify({ ops, expectRev, origin: "user" }) }),
 };
 
 export type DaemonEvent = {
-    type: "hello" | "project.updated" | "project.deleted";
+    type: "hello" | "project.updated" | "project.ops" | "project.deleted";
     id?: string;
     rev?: number;
+    ops?: number;
     clientId?: string;
     version?: string;
 };

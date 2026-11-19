@@ -174,6 +174,26 @@ try {
     const rawBody = readBodies().find((item) => item?.prompt === "raw body 测试");
     check("rawBody 原样作为请求体（陌生 family 也能跑）", Boolean(rawBody) && rawBody.duration === "5");
 
+    // 运行详情/摘要/重试/删除
+    const runDetail = await fetch(`${BASE}/api/runs/${run.id}`, { headers }).then((r) => r.json());
+    check("详情带实际请求体", runDetail.run?.builtBody?.input?.messages?.[0]?.content?.[0]?.text === "a cat", JSON.stringify(runDetail.run?.builtBody).slice(0, 200));
+    const listSummary = await fetch(`${BASE}/api/runs?projectId=smokeproj`, { headers }).then((r) => r.json());
+    check("列表不带 body（避免大响应）", listSummary.runs.every((item) => !("body" in item) && !("builtBody" in item)));
+    check("摘要标记 hasBuiltBody", listSummary.runs.some((item) => item.hasBuiltBody));
+
+    const retried = await fetch(`${BASE}/api/runs/${run.id}/retry`, { method: "POST", headers }).then((r) => r.json());
+    check("重试生成新 run", retried.run?.id && retried.run.id !== run.id && retried.run.status === "queued");
+    for (let i = 0; i < 40; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        const payload = await fetch(`${BASE}/api/runs/${retried.run.id}`, { headers }).then((r) => r.json());
+        if (["completed", "failed", "uncertain", "stopped"].includes(payload.run?.status)) break;
+    }
+
+    const beforeDelete = (await fetch(`${BASE}/api/runs?projectId=smokeproj`, { headers }).then((r) => r.json())).runs.length;
+    const deleted = await fetch(`${BASE}/api/runs/${retried.run.id}`, { method: "DELETE", headers }).then((r) => r.json());
+    const afterDelete = (await fetch(`${BASE}/api/runs?projectId=smokeproj`, { headers }).then((r) => r.json())).runs.length;
+    check("删除运行记录", deleted.ok === true && afterDelete === beforeDelete - 1);
+
     // 列表与取消
     const list = await fetch(`${BASE}/api/runs?projectId=smokeproj`, { headers }).then((r) => r.json());
     check("run 列表", (list.runs?.length || 0) >= 2 && list.runs.some((item) => item.id === run.id));

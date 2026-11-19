@@ -8,7 +8,8 @@ import path from "node:path";
 
 import { createStore } from "./store.mjs";
 import { receiveAsset, serveAsset } from "./assets.mjs";
-import { createCatalogCache, createRunStore, openDb } from "./db.mjs";
+import { createCatalogCache, createOpLog, createRunStore, openDb } from "./db.mjs";
+import { applyOps, normalizeOps } from "./ops.mjs";
 import { createGateway } from "./gateway.mjs";
 import { createRunEngine } from "./runs.mjs";
 
@@ -103,6 +104,7 @@ function broadcast(event, exceptClientId) {
 const db = openDb(ROOT);
 const runStore = createRunStore(db);
 const catalog = createCatalogCache(db);
+const opLog = createOpLog(db);
 const gateway = createGateway();
 const bodyDir = path.join(ROOT, "tmp");
 fs.mkdirSync(bodyDir, { recursive: true });
@@ -236,7 +238,12 @@ async function handle(req, res) {
     if (pathname === "/api/runs" && req.method === "GET") {
         const projectId = url.searchParams.get("projectId") || "";
         const limit = Math.min(Number(url.searchParams.get("limit") || 100), 500);
-        return sendJson(res, 200, { runs: runStore.list(projectId || null, limit) });
+        const runs = runStore.list(projectId || null, limit).map((run) => {
+            // 列表不带 body（可能很大），详情单独取
+            const { body, builtBody, idempotencyKey, ...summary } = run;
+            return { ...summary, hasBuiltBody: Boolean(builtBody) };
+        });
+        return sendJson(res, 200, { runs });
     }
 
     if (pathname === "/api/runs" && req.method === "POST") {
@@ -260,6 +267,17 @@ async function handle(req, res) {
         if (!run) return sendJson(res, 404, { error: "not_found" });
         return sendJson(res, 200, { run });
     }
+    if (runMatch && req.method === "DELETE") {
+        return sendJson(res, 200, { ok: runStore.remove(runMatch[1]) });
+    }
+
+    const retryMatch = pathname.match(/^\/api\/runs\/([0-9a-f-]{36})\/retry$/);
+    if (retryMatch && req.method === "POST") {
+        const source = runStore.get(retryMatch[1]);
+        if (!source) return sendJson(res, 404, { error: "not_found" });
+        const run = engine.enqueue({ projectId: source.projectId, nodeId: source.nodeId, provider: source.provider, endpoint: source.endpoint, body: source.body });
+        return sendJson(res, 200, { run });
+    }
 
     const cancelMatch = pathname.match(/^\/api\/runs\/([0-9a-f-]{36})\/cancel$/);
     if (cancelMatch && req.method === "POST") {
@@ -267,6 +285,36 @@ async function handle(req, res) {
         if (!run) return sendJson(res, 404, { error: "not_found" });
         const updated = await engine.cancel(run);
         return sendJson(res, 200, { run: updated });
+    }
+
+    // 增量 op：画布改动按 op 应用，返回新 rev；expectRev 不匹配返回 409 让客户端回退整份保存
+    const opsMatch = pathname.match(/^\/api\/projects\/([A-Za-z0-9_-]{1,64})\/ops$/);
+    if (opsMatch && req.method === "POST") {
+        const id = opsMatch[1];
+        let body;
+        try {
+            body = JSON.parse(await readBody(req));
+        } catch (error) {
+            return sendJson(res, 400, { error: "invalid_json", message: error.message });
+        }
+        try {
+            const ops = normalizeOps(body.ops);
+            const existing = store.readProject(id);
+            if (!existing) return sendJson(res, 404, { error: "not_found" });
+            if (body.expectRev != null && existing.rev !== body.expectRev) return sendJson(res, 409, { error: "rev_conflict", rev: existing.rev });
+            const result = applyOps(store, id, ops);
+            opLog.append(id, ops, body.origin || "user");
+            const clientId = String(req.headers["x-canvas-client"] || url.searchParams.get("client") || "");
+            broadcast({ type: "project.ops", id, rev: result.rev, ops: ops.length, clientId });
+            return sendJson(res, 200, { rev: result.rev });
+        } catch (error) {
+            return sendJson(res, 400, { error: error.code || "invalid_op", message: error.message });
+        }
+    }
+
+    if (opsMatch && req.method === "GET") {
+        const limit = Math.min(Number(url.searchParams.get("limit") || 200), 1000);
+        return sendJson(res, 200, { ops: opLog.list(opsMatch[1], limit) });
     }
 
     // 资产上传：body 为原始二进制，mime 走 query（浏览器 fetch 的 content-type 可直接用）

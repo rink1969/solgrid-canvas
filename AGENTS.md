@@ -21,7 +21,7 @@
 
 ## 二、架构铁律（违反即返工）
 
-1. **项目目录是唯一事实源**：`projects/<id>/` 下的 `canvas.json`、`assets/`、`runs.sqlite`、`timeline.json`、`exports/` 就是产品数据；Agent 通过文件系统直接读写。
+1. **项目目录是唯一事实源**：`projects/<id>/` 下的 `canvas.json`、`assets/`、`timeline.json`、`exports/` 就是产品数据；run 账本与 op 日志在 `~/.solgrid-canvas/canvas.db`（SQLite）。Agent 通过文件系统 / MCP 读写。
 2. **节点只存 `assetId`**：禁止把 dataURL / base64 / Blob 写进画布文档、前端 store 或日志。资产一律内容寻址落盘（`projects/<id>/assets/<sha256>.<ext>`），节点引用形如 `storageKey: "asset:<projectId>/<sha256>.<ext>"`。
 3. **只有 daemon 发起付费调用**：web 端不直连任何生成 API，不持有 solgrid API key，不持有任何模型凭证。
 4. **生成只走 `solgrid` CLI**：`solgrid run -p … -e … -f body.json --idempotency-key K -j`（**不带 `--wait`**）+ `solgrid runs get -r R -j` 轮询。幂等键由 daemon 生成、入队即落盘；重试复用同一个键。

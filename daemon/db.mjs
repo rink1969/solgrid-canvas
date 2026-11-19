@@ -34,7 +34,15 @@ export function openDb(root) {
             fetched_at INTEGER NOT NULL
         );
     `);
+    ensureColumn(db, "runs", "built_body_json", "TEXT");
     return db;
+}
+
+// 只加不删的轻量迁移：项目未上线，但仍避免旧库缺列直接报错
+function ensureColumn(db, table, column, type) {
+    const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+    if (columns.some((item) => item.name === column)) return;
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
 }
 
 const now = () => new Date().toISOString();
@@ -47,8 +55,9 @@ export function createRunStore(db) {
     const getStmt = db.prepare("SELECT * FROM runs WHERE id = ?");
     const nextStmt = db.prepare("SELECT * FROM runs WHERE status = 'queued' ORDER BY created_at LIMIT 1");
     const updateStmt = db.prepare(`
-        UPDATE runs SET status = ?, remote_run_id = COALESCE(?, remote_run_id), cost_spark = COALESCE(?, cost_spark),
-            billing_status = COALESCE(?, billing_status), error = ?, outputs_json = COALESCE(?, outputs_json),
+        UPDATE runs SET status = COALESCE(?, status), remote_run_id = COALESCE(?, remote_run_id), cost_spark = COALESCE(?, cost_spark),
+            billing_status = COALESCE(?, billing_status), error = ?,
+            built_body_json = COALESCE(?, built_body_json), outputs_json = COALESCE(?, outputs_json),
             started_at = COALESCE(?, started_at), finished_at = COALESCE(?, finished_at)
         WHERE id = ?
     `);
@@ -70,6 +79,7 @@ export function createRunStore(db) {
             costSpark: row.cost_spark,
             billingStatus: row.billing_status,
             error: row.error,
+            builtBody: row.built_body_json ? JSON.parse(row.built_body_json) : null,
             outputs: row.outputs_json ? JSON.parse(row.outputs_json) : null,
             createdAt: row.created_at,
             startedAt: row.started_at,
@@ -94,6 +104,7 @@ export function createRunStore(db) {
                 patch.costSpark ?? null,
                 patch.billingStatus ?? null,
                 patch.error ?? null,
+                patch.builtBody ? JSON.stringify(patch.builtBody) : null,
                 patch.outputs ? JSON.stringify(patch.outputs) : null,
                 patch.startedAt ?? null,
                 patch.finishedAt ?? null,
@@ -107,6 +118,33 @@ export function createRunStore(db) {
         },
         unfinished() {
             return unfinishedStmt.all().map(hydrate);
+        },
+        remove(id) {
+            return db.prepare("DELETE FROM runs WHERE id = ?").run(id).changes > 0;
+        },
+    };
+}
+
+export function createOpLog(db) {
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS ops (
+            seq INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id TEXT NOT NULL,
+            ts TEXT NOT NULL,
+            origin TEXT,
+            payload TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS ops_project ON ops(project_id, seq);
+    `);
+    const insert = db.prepare("INSERT INTO ops (project_id, ts, origin, payload) VALUES (?, ?, ?, ?)");
+    const list = db.prepare("SELECT seq, ts, origin, payload FROM ops WHERE project_id = ? ORDER BY seq DESC LIMIT ?");
+    return {
+        append(projectId, ops, origin) {
+            const ts = new Date().toISOString();
+            for (const op of ops) insert.run(projectId, ts, origin || "user", JSON.stringify(op));
+        },
+        list(projectId, limit = 200) {
+            return list.all(projectId, limit).map((row) => ({ seq: row.seq, ts: row.ts, origin: row.origin, op: JSON.parse(row.payload) }));
         },
     };
 }

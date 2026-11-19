@@ -5,6 +5,12 @@ export type SolgridOutput = { url: string; storageKey: string; file: string; mim
 
 export type SolgridRun = {
     id: string;
+    provider?: string;
+    endpoint?: string;
+    nodeId?: string | null;
+    createdAt?: string;
+    startedAt?: string | null;
+    finishedAt?: string | null;
     status: "queued" | "submitting" | "running" | "completed" | "failed" | "uncertain" | "stopped";
     error?: string | null;
     costSpark?: number | null;
@@ -57,7 +63,30 @@ export function createRun(input: { projectId: string; nodeId?: string; provider:
 }
 
 export function getRun(id: string) {
-    return request<{ run: SolgridRun }>(`/runs/${id}`);
+    return request<{ run: SolgridRun & { builtBody?: unknown; body?: unknown; idempotencyKey?: string; remoteRunId?: string | null } }>(`/runs/${id}`);
+}
+
+export type SolgridRunSummary = Omit<SolgridRun, "outputs"> & {
+    outputs?: SolgridOutput[] | null;
+    createdAt: string;
+    hasBuiltBody?: boolean;
+};
+
+export async function listRuns(projectId: string, limit = 100): Promise<SolgridRunSummary[]> {
+    const data = await request<{ runs: SolgridRunSummary[] }>(`/runs?projectId=${encodeURIComponent(projectId)}&limit=${limit}`);
+    return data.runs || [];
+}
+
+export function cancelRun(id: string) {
+    return request<{ run: SolgridRun }>(`/runs/${id}/cancel`, { method: "POST" });
+}
+
+export function retryRun(id: string) {
+    return request<{ run: SolgridRun }>(`/runs/${id}/retry`, { method: "POST" });
+}
+
+export function deleteRun(id: string) {
+    return request<{ ok: boolean }>(`/runs/${id}`, { method: "DELETE" });
 }
 
 const TERMINAL = new Set(["completed", "failed", "uncertain", "stopped"]);
