@@ -12,6 +12,34 @@ function sizeToPixels(size) {
 }
 
 // qwen-image / wan-image 的像素范围：512*512 ~ 2048*2048，长宽比 1:8 ~ 8:1
+// 画布的 vquality 是 "480"/"720"/"1080"（不带 p），平台枚举要 "480p"/"720P"
+function resolutionTier(value) {
+    const match = /(\d{3,4})/.exec(String(value || ""));
+    return match ? Number(match[1]) : 720;
+}
+
+function seedanceResolution(value) {
+    const tier = resolutionTier(value);
+    if (tier >= 720) return "720p"; // mini 最高 720p，超出按 720p 处理
+    return "480p";
+}
+
+function wanResolution(value) {
+    return resolutionTier(value) >= 1080 ? "1080P" : "720P";
+}
+
+// 画布视频的 size 是 "宽x高"（auto 表示自适应），据此推断平台 ratio
+function ratioFromSize(size) {
+    const match = /^(\d+)[x*](\d+)$/.exec(String(size || ""));
+    if (!match) return null;
+    const value = Number(match[1]) / Number(match[2]);
+    const candidates = [["16:9", 16 / 9], ["4:3", 4 / 3], ["1:1", 1], ["3:4", 3 / 4], ["9:16", 9 / 16], ["21:9", 21 / 9]];
+    for (const [label, target] of candidates) {
+        if (Math.abs(value - target) / target <= 0.06) return label;
+    }
+    return null;
+}
+
 function clampImageSize(size) {
     const { width, height } = sizeToPixels(size);
     const scale = Math.min(2048 / Math.max(width, height), Math.max(512 / Math.min(width, height), 1), 1.9);
@@ -41,7 +69,7 @@ function wanVideo({ params, mediaUrls }) {
     const body = {
         input: { prompt: String(params.prompt || "").trim(), ...(media.length ? { media } : {}) },
         parameters: {
-            resolution: String(params.resolution || "720P").toUpperCase().includes("1080") ? "1080P" : "720P",
+            resolution: wanResolution(params.resolution),
             duration: Math.max(2, Math.min(15, Math.round(Number(params.seconds) || 5))),
         },
     };
@@ -57,12 +85,12 @@ function seedanceVideo({ params, mediaUrls }) {
     });
     const body = {
         content,
-        resolution: String(params.resolution || "720p").toLowerCase() === "1080p" ? "1080p" : String(params.resolution || "720p").toLowerCase(),
+        resolution: seedanceResolution(params.resolution),
         duration: Math.max(4, Math.min(15, Math.round(Number(params.seconds) || 5))),
         generate_audio: params.generateAudio === "true" || params.generateAudio === true,
     };
-    // 首尾帧模式要求 adaptive
-    body.ratio = mode === "frames" ? "adaptive" : String(params.ratio || "adaptive");
+    // 首尾帧模式要求 adaptive；参考模式沿用画布比例（从 size 推断，未知则自适应）
+    body.ratio = mode === "frames" ? "adaptive" : ratioFromSize(params.size) || "adaptive";
     return body;
 }
 

@@ -111,6 +111,27 @@ try {
     check("视频 body 用 input.media + parameters", videoBody?.parameters?.resolution === "720P" && videoBody?.parameters?.duration === 5, JSON.stringify(videoBody).slice(0, 300));
     check("参考图经 files upload 变成 URL", videoBody?.input?.media?.[0]?.type === "first_frame" && String(videoBody?.input?.media?.[0]?.url).startsWith("https://fake.local/"), JSON.stringify(videoBody?.input?.media));
 
+    // seedance：vquality "480" → "480p"，size 640x480 → ratio 4:3（reference 模式）
+    const seedanceRun = await fetch(`${BASE}/api/runs`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+            projectId: "smokeproj",
+            provider: "bytedance",
+            endpoint: "/v1/video/seedance-2.0-mini",
+            params: { prompt: "seedance测试", references: ["asset:smokeproj/0000000000000000000000000000000000000000000000000000000000000000.png"], resolution: "480", size: "640x480", videoMode: "reference", seconds: "4" },
+        }),
+    }).then((r) => r.json());
+    for (let i = 0; i < 80; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const payload = await fetch(`${BASE}/api/runs/${seedanceRun.run.id}`, { headers }).then((r) => r.json());
+        if (["completed", "failed", "uncertain", "stopped"].includes(payload.run?.status)) break;
+    }
+    const seedanceBody = readBodies().find((item) => item?.content?.[0]?.text === "seedance测试");
+    check("seedance 分辨率归一化", seedanceBody?.resolution === "480p", JSON.stringify(seedanceBody).slice(0, 200));
+    check("seedance 比例由 size 推断", seedanceBody?.ratio === "4:3", JSON.stringify(seedanceBody?.ratio));
+    check("seedance 拒绝时标记 failed 而非 uncertain", seedanceRun.run.status !== "uncertain");
+
     // 列表与取消
     const list = await fetch(`${BASE}/api/runs?projectId=smokeproj`, { headers }).then((r) => r.json());
     check("run 列表", (list.runs?.length || 0) >= 2 && list.runs.some((item) => item.id === run.id));

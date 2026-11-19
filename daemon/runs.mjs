@@ -167,16 +167,25 @@ export function createRunEngine({ store, gateway, projectsDir, bodyDir, broadcas
                     idempotencyKey: run.idempotencyKey,
                 });
             } catch (error) {
-                // 提交结果不确定：用同一个幂等键找回；找不到才算不确定
+                log(`run ${run.id} 提交失败：${error.message}（family=${prepared.family}）`);
+                log(`run ${run.id} body=${JSON.stringify(prepared.body).slice(0, 800)}`);
+                // 分类：能被明确判定"没创建"就是 failed；只有幂等键找回失败且无法判定时才 uncertain
+                let outcome = "unknown";
                 if (error.idempotencyKey) {
                     try {
                         const found = await gateway.getRunByKey(error.idempotencyKey);
                         if (found.remoteRunId) submitted = { remoteRunId: found.remoteRunId };
-                    } catch {
-                        // 继续走 uncertain
+                        else outcome = "absent";
+                    } catch (lookupError) {
+                        if (lookupError.code === "tool_run_not_found") outcome = "absent";
                     }
+                } else {
+                    // 本地校验/参数错误：没有幂等键，说明 run 根本没被创建
+                    outcome = "absent";
                 }
-                if (!submitted) return fail(run, `提交结果未知：${error.message}`, "uncertain");
+                if (!submitted) {
+                    return outcome === "absent" ? fail(run, `提交被拒绝：${error.message}`, "failed") : fail(run, `提交结果未知：${error.message}`, "uncertain");
+                }
             }
             const running = store.update(run.id, { status: "running", remoteRunId: submitted.remoteRunId });
             emit(running);
