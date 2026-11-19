@@ -3,7 +3,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 
-const TIMEOUTS = { run: 180_000, get: 60_000, stop: 30_000, discover: 60_000, inspect: 60_000 };
+const TIMEOUTS = { run: 180_000, get: 60_000, stop: 30_000, discover: 60_000, inspect: 60_000, upload: 300_000 };
 
 function resolveBinary() {
     const configured = process.env.CANVAS_SOLGRID_BIN || "solgrid";
@@ -22,6 +22,13 @@ function assertSafe(value, name) {
     if (!SAFE_TOKEN.test(String(value || ""))) throw new Error(`${name} 含非法字符`);
     return String(value);
 }
+// 本机文件路径允许空格、反斜杠与冒号，但拒绝能改变命令行结构的字符
+function assertPathSafe(value) {
+    const text = String(value || "");
+    if (!text || /["&|<>^%\r\n]/.test(text)) throw new Error("文件路径含非法字符");
+    return text;
+}
+
 function sanitizeQuery(value) {
     return String(value || "").replace(/[%\r\n\t]/g, " ").trim().slice(0, 200);
 }
@@ -141,6 +148,14 @@ export function createGateway() {
         async discover(query, limit = 20) {
             const json = await callCli(["discover", "-q", sanitizeQuery(query), "-l", String(limit), "-j"], "discover");
             return unwrap(json).results || [];
+        },
+        async uploadFile(filePath) {
+            assertPathSafe(filePath);
+            const json = await callCli(["files", "upload", filePath, "-j"], "upload");
+            const value = unwrap(json);
+            const url = value.downloadUrl || value.url || value.file?.downloadUrl;
+            if (!url) throw new Error("files upload 未返回 downloadUrl");
+            return url;
         },
         async inspect(provider, endpoint) {
             assertSafe(provider, "provider");

@@ -10,6 +10,9 @@
 + [新增] daemon 新增 run 队列：`solgrid run` 提交 → `runs get` 轮询 → 产物自动落地 → 记账 cost；幂等键入队落盘、启动可恢复。
 + [新增] daemon 新增工具目录接口（`discover` / `inspect`，缓存 24 小时），供画布动态生成模型与参数表单。
 + [调整] 节点 `storageKey` 改为 `asset:<projectId>/<sha256>.<ext>`，与项目目录里的资产文件一一对应。
++ [新增] 画布图片/视频节点可直接选择 solgrid 模型（provider + endpoint）并生成：daemon 按模型族（alibaba 图像 / wan 视频 / seedance）转换请求体，参考素材经 `files upload` 转公网 URL，产物落 `assets/`。
++ [调整] 图片/视频节点的模型选择器改为平台模型目录（`/api/tools`），不再依赖渠道配置；未选模型时点击生成会提示先选模型。
++ [新增] 生成前弹出确认框，明确 provider / endpoint 与"费用以平台计费为准"。
 
 ## v0.20.0 - 2026-10-10
 

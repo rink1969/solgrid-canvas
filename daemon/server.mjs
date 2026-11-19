@@ -211,7 +211,9 @@ async function handle(req, res) {
         }
         const { projectId, nodeId, provider, endpoint } = body || {};
         if (!projectId || !provider || !endpoint) return sendJson(res, 400, { error: "missing_fields", hint: "需要 projectId / provider / endpoint" });
-        const run = engine.enqueue({ projectId, nodeId, provider, endpoint, body: body.body ?? {} });
+        // params 是画布语义（prompt/size/references…），由 daemon 按 family 转成 provider 契约；
+        // 想直接控制请求体就传 params.rawBody。
+        const run = engine.enqueue({ projectId, nodeId, provider, endpoint, body: body.params ?? body.body ?? {} });
         return sendJson(res, 200, { run });
     }
 

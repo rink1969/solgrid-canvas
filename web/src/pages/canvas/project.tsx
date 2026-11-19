@@ -6,6 +6,7 @@ import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
 
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
+import { createRun, waitRun } from "@/services/api/solgrid";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { createVideoGenerationTask, isVideoTaskFailed, storeGeneratedVideo, waitForVideoGenerationTask } from "@/services/api/video";
 import { defaultConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
@@ -142,6 +143,22 @@ function applyGeneratedVideo(item: CanvasNodeData, video: UploadedFile, extra: C
         position: { x: item.position.x + item.width / 2 - videoSize.width / 2, y: item.position.y + item.height / 2 - videoSize.height / 2 },
         metadata: { ...item.metadata, ...videoMetadata(video), ...extra },
     };
+}
+
+// 用函数而不是内联比较，避免 TypeScript 在提前 return 后把 mode 收窄成 text|audio
+function isMediaGenerationMode(mode: CanvasNodeGenerationMode) {
+    return mode === "image" || mode === "video";
+}
+
+function probeVideoMeta(url: string) {
+    return new Promise<{ width: number; height: number; durationMs?: number }>((resolve) => {
+        const video = document.createElement("video");
+        const done = () => resolve({ width: video.videoWidth || 1280, height: video.videoHeight || 720, durationMs: Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : undefined });
+        video.onloadedmetadata = done;
+        video.onerror = done;
+        setTimeout(done, 5000);
+        video.src = url;
+    });
 }
 
 export default function CanvasPage() {
@@ -2330,9 +2347,121 @@ function InfiniteCanvasPage() {
         setContextMenu(null);
     }, []);
 
+    // solgrid 生成：节点选了 {provider, endpoint} 时走这里，由 daemon 排队调用平台
+    const runSolgridGeneration = useCallback(
+        async (sourceNode: CanvasNodeData, mode: "image" | "video", prompt: string) => {
+            const nodeId = sourceNode.id;
+            const provider = sourceNode.metadata?.provider;
+            const endpoint = sourceNode.metadata?.endpoint;
+            if (!provider || !endpoint) return;
+
+            setRunningNodeId(nodeId);
+            const controller = startGenerationRequest(nodeId, nodeId, nodeId);
+            setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt, status: NODE_STATUS_LOADING, errorDetails: undefined } } : node)));
+
+            try {
+                const context = await hydrateNodeGenerationContext(buildNodeGenerationContext(nodeId, nodesRef.current, connectionsRef.current, prompt));
+                if (controller.signal.aborted) return;
+                const references: string[] = [];
+                for (const image of context.referenceImages || []) {
+                    if (image.storageKey) references.push(image.storageKey);
+                    else if (image.dataUrl) references.push(image.dataUrl);
+                    else if (image.url) references.push(image.url);
+                }
+                const params: Record<string, unknown> = {
+                    prompt: context.prompt,
+                    references,
+                    size: sourceNode.metadata?.size,
+                    count: Math.max(1, Number(sourceNode.metadata?.count) || 1),
+                    seconds: sourceNode.metadata?.seconds,
+                    resolution: sourceNode.metadata?.vquality,
+                    generateAudio: sourceNode.metadata?.generateAudio,
+                    videoMode: sourceNode.metadata?.videoMode,
+                };
+                const confirmed = await new Promise<boolean>((resolve) => {
+                    Modal.confirm({
+                        title: mode === "video" ? "确认生成视频" : "确认生成图片",
+                        content: `${provider} · ${endpoint}\n费用以 solgrid 平台实际计费为准。`,
+                        okText: "生成",
+                        cancelText: "取消",
+                        onOk: () => resolve(true),
+                        onCancel: () => resolve(false),
+                    });
+                });
+                if (!confirmed) return;
+                const { run } = await createRun({ projectId, nodeId, provider, endpoint, params });
+                const final = await waitRun(run.id, controller.signal);
+                if (final.status !== "completed") throw new Error(final.error || `生成失败（${final.status}）`);
+                const output = final.outputs?.[0];
+                if (!output) throw new Error("平台没有返回产物");
+
+                if (mode === "image") {
+                    const meta = await readImageMeta(output.url);
+                    setNodes((prev) =>
+                        prev.map((node) =>
+                            node.id === nodeId
+                                ? {
+                                      ...node,
+                                      metadata: {
+                                          ...node.metadata,
+                                          ...imageMetadata({ url: output.url, storageKey: output.storageKey, width: meta.width, height: meta.height, bytes: output.bytes, mimeType: output.mime }),
+                                          prompt: context.prompt,
+                                          provider,
+                                          endpoint,
+                                          status: NODE_STATUS_SUCCESS,
+                                          errorDetails: undefined,
+                                      },
+                                  }
+                                : node,
+                        ),
+                    );
+                } else {
+                    const videoMeta = await probeVideoMeta(output.url);
+                    setNodes((prev) =>
+                        prev.map((node) =>
+                            node.id === nodeId
+                                ? {
+                                      ...node,
+                                      metadata: {
+                                          ...node.metadata,
+                                          ...videoMetadata({ url: output.url, storageKey: output.storageKey, bytes: output.bytes, mimeType: output.mime || "video/mp4", ...videoMeta }),
+                                          prompt: context.prompt,
+                                          provider,
+                                          endpoint,
+                                          status: NODE_STATUS_SUCCESS,
+                                          errorDetails: undefined,
+                                      },
+                                  }
+                                : node,
+                        ),
+                    );
+                }
+                message.success(`生成完成${typeof final.costSpark === "number" ? `（${final.costSpark} Spark）` : ""}`);
+            } catch (error) {
+                if (isGenerationCanceled(error)) return;
+                const detail = error instanceof Error ? error.message : "生成失败";
+                message.error(detail);
+                setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: detail } } : node)));
+            } finally {
+                finishGenerationRequest(nodeId, controller);
+                setRunningNodeId((current) => (current === nodeId ? null : current));
+            }
+        },
+        [finishGenerationRequest, message, projectId, startGenerationRequest],
+    );
+
     const handleGenerateNode = useCallback(
         async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => {
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
+            // 选了 solgrid 平台模型的节点：跳过渠道/脚本那套，直接排队
+            if (sourceNode?.metadata?.provider && sourceNode.metadata?.endpoint && (mode === "image" || mode === "video")) {
+                await runSolgridGeneration(sourceNode, mode, prompt);
+                return;
+            }
+            if (isMediaGenerationMode(mode) && !(sourceNode?.metadata?.provider && sourceNode.metadata?.endpoint)) {
+                message.warning("请先在节点上选择 solgrid 模型");
+                return;
+            }
             const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
@@ -2766,7 +2895,7 @@ function InfiniteCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest, t],
+        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, runSolgridGeneration, startGenerationRequest, t],
     );
     useEffect(() => {
         generateNodeRef.current = handleGenerateNode;

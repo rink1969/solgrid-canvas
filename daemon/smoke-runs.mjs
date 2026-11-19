@@ -63,7 +63,7 @@ try {
     const created = await fetch(`${BASE}/api/runs`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ projectId: "smokeproj", nodeId: "node1", provider: "fake", endpoint: "/v1/fake-image", body: { prompt: "a cat" } }),
+        body: JSON.stringify({ projectId: "smokeproj", nodeId: "node1", provider: "alibaba", endpoint: "/v1/image/qwen-image-3.0", params: { prompt: "a cat", size: "1024x1024" } }),
     }).then((r) => r.json());
     check("提交 run 返回 queued", created.run?.status === "queued" && !!created.run?.idempotencyKey, JSON.stringify(created).slice(0, 200));
 
@@ -83,14 +83,42 @@ try {
     check("产物文件存在", fs.existsSync(outputFile), outputFile);
     check("产物 storageKey 可拼地址", run.outputs[0].url === `/api/projects/smokeproj/assets/${run.outputs[0].file}`);
 
+    // family 映射：图片请求体
+    const bodiesDir = path.join(HOME, "fake-state", "bodies");
+    const readBodies = () => fs.readdirSync(bodiesDir).map((file) => JSON.parse(fs.readFileSync(path.join(bodiesDir, file), "utf8")));
+    const imageBody = readBodies().find((item) => item?.input?.messages?.[0]?.content?.[0]?.text === "a cat");
+    check("图片 body 符合 alibaba 契约", Boolean(imageBody) && /^\d+\*\d+$/.test(imageBody.parameters?.size || ""), JSON.stringify(imageBody).slice(0, 300));
+
+    // family 映射：视频 + 参考素材上传
+    const videoRun = await fetch(`${BASE}/api/runs`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+            projectId: "smokeproj",
+            provider: "alibaba",
+            endpoint: "/v1/video/wan2.7-i2v",
+            params: { prompt: "视频测试", seconds: 5, resolution: "720p", references: [`data:image/png;base64,${Buffer.from("89504e470d0a1a0a", "hex").toString("base64")}`] },
+        }),
+    }).then((r) => r.json());
+    let videoFinished = null;
+    for (let i = 0; i < 80; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const payload = await fetch(`${BASE}/api/runs/${videoRun.run.id}`, { headers }).then((r) => r.json());
+        videoFinished = payload.run;
+        if (videoFinished && ["completed", "failed", "uncertain", "stopped"].includes(videoFinished.status)) break;
+    }
+    const videoBody = readBodies().find((item) => item?.input?.prompt === "视频测试");
+    check("视频 body 用 input.media + parameters", videoBody?.parameters?.resolution === "720P" && videoBody?.parameters?.duration === 5, JSON.stringify(videoBody).slice(0, 300));
+    check("参考图经 files upload 变成 URL", videoBody?.input?.media?.[0]?.type === "first_frame" && String(videoBody?.input?.media?.[0]?.url).startsWith("https://fake.local/"), JSON.stringify(videoBody?.input?.media));
+
     // 列表与取消
     const list = await fetch(`${BASE}/api/runs?projectId=smokeproj`, { headers }).then((r) => r.json());
-    check("run 列表", list.runs?.length === 1 && list.runs[0].id === run.id);
+    check("run 列表", (list.runs?.length || 0) >= 2 && list.runs.some((item) => item.id === run.id));
 
     const cancelTarget = await fetch(`${BASE}/api/runs`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ projectId: "smokeproj", provider: "fake", endpoint: "/v1/fake-image", body: { prompt: "second" } }),
+        body: JSON.stringify({ projectId: "smokeproj", provider: "alibaba", endpoint: "/v1/image/qwen-image-3.0", params: { prompt: "second" } }),
     }).then((r) => r.json());
     const cancelled = await fetch(`${BASE}/api/runs/${cancelTarget.run.id}/cancel`, { method: "POST", headers }).then((r) => r.json());
     check("取消 run", ["stopped", "failed"].includes(cancelled.run?.status), JSON.stringify(cancelled).slice(0, 200));

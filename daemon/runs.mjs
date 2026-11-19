@@ -6,7 +6,10 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 
+import path from "node:path";
+
 import { saveAssetFromBuffer, saveAssetFromUrl } from "./assets.mjs";
+import { buildBody } from "./families.mjs";
 import { pickCost, pickOutputs, tempBodyPath } from "./gateway.mjs";
 
 const POLL_START_MS = 2000;
@@ -98,9 +101,60 @@ export function createRunEngine({ store, gateway, projectsDir, bodyDir, broadcas
         }
     }
 
+    // 参考素材：asset: 直接映射到项目文件；data: 落到临时文件；https 直接透传
+    function resolveReference(ref, projectId) {
+        if (typeof ref !== "string" || !ref) return null;
+        if (ref.startsWith("asset:")) {
+            const rest = ref.slice("asset:".length);
+            const slash = rest.indexOf("/");
+            if (slash <= 0) return null;
+            const [project, file] = [rest.slice(0, slash), rest.slice(slash + 1)];
+            if (project !== projectId) throw new Error("暂不支持跨项目引用素材");
+            return { file: path.join(projectsDir, project, "assets", file) };
+        }
+        if (ref.startsWith("data:")) {
+            const match = /^data:([^;]+);base64,([\s\S]+)$/.exec(ref);
+            if (!match) return null;
+            const ext = (match[1].split("/")[1] || "bin").replace("jpeg", "jpg");
+            const file = path.join(bodyDir, `ref-${crypto.randomUUID()}.${ext}`);
+            fs.writeFileSync(file, Buffer.from(match[2], "base64"));
+            return { file, temp: true };
+        }
+        if (/^https:\/\//i.test(ref)) return { url: ref };
+        return null;
+    }
+
+    async function prepareBody(run) {
+        const params = run.body || {};
+        const tempFiles = [];
+        const mediaUrls = [];
+        for (const ref of Array.isArray(params.references) ? params.references : []) {
+            const resolved = resolveReference(ref, run.projectId);
+            if (!resolved) continue;
+            if (resolved.url) mediaUrls.push(resolved.url);
+            else {
+                if (resolved.temp) tempFiles.push(resolved.file);
+                mediaUrls.push(await gateway.uploadFile(resolved.file));
+            }
+        }
+        try {
+            const built = buildBody({ provider: run.provider, endpoint: run.endpoint, params, mediaUrls });
+            return { body: built.body, family: built.family, tempFiles };
+        } catch (error) {
+            for (const file of tempFiles) fs.rm(file, { force: true }, () => undefined);
+            throw error;
+        }
+    }
+
     async function execute(run) {
+        let prepared;
+        try {
+            prepared = await prepareBody(run);
+        } catch (error) {
+            return fail(run, error.message, "failed");
+        }
         const bodyPath = tempBodyPath(bodyDir, run.idempotencyKey);
-        fs.writeFileSync(bodyPath, JSON.stringify(run.body ?? {}));
+        fs.writeFileSync(bodyPath, JSON.stringify(prepared.body));
         const submitting = store.update(run.id, { status: "submitting", startedAt: new Date().toISOString() });
         emit(submitting);
         try {
@@ -129,6 +183,7 @@ export function createRunEngine({ store, gateway, projectsDir, bodyDir, broadcas
             return await poll(running);
         } finally {
             fs.rm(bodyPath, { force: true }, () => undefined);
+            for (const file of prepared.tempFiles) fs.rm(file, { force: true }, () => undefined);
         }
     }
 

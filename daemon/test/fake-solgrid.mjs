@@ -7,6 +7,8 @@ const stateDir = process.env.FAKE_STATE || path.join(process.cwd(), ".fake-solgr
 const pollLimit = Number(process.env.FAKE_POLLS || 1);
 fs.mkdirSync(path.join(stateDir, "runs"), { recursive: true });
 fs.mkdirSync(path.join(stateDir, "keys"), { recursive: true });
+fs.mkdirSync(path.join(stateDir, "bodies"), { recursive: true });
+fs.mkdirSync(path.join(stateDir, "uploads"), { recursive: true });
 
 const TINY_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVR4nGNgAAAAAgABSK+kcQAAAABJRU5ErkJggg==";
 
@@ -37,6 +39,9 @@ if (command === "run") {
     if (process.env.FAKE_FAIL_SUBMIT) emit({ error: { code: "tool_service_unavailable", message: "fake submit failure" } }, 1);
     const id = `fake-${Date.now()}`;
     const key = flag("--idempotency-key");
+    // 把 daemon 生成的请求体留档，冒烟测试据此校验 family 映射
+    const inputFile = flag("-f");
+    if (inputFile && fs.existsSync(inputFile)) fs.copyFileSync(inputFile, path.join(stateDir, "bodies", `${id}.json`));
     writeRun({ id, polls: 0, key });
     if (key) fs.writeFileSync(path.join(stateDir, "keys", key), id);
     emit({ id, status: "READY", idempotencyKey: key });
@@ -66,6 +71,13 @@ if (command === "runs" && argv[1] === "get") {
 }
 
 if (command === "runs" && argv[1] === "stop") emit({ id: flag("-r"), status: "STOPPED" });
+
+if (command === "files" && argv[1] === "upload") {
+    const file = argv[2];
+    const name = path.basename(String(file));
+    if (file && fs.existsSync(file)) fs.copyFileSync(file, path.join(stateDir, "uploads", name));
+    emit({ downloadUrl: `https://fake.local/${encodeURIComponent(name)}` });
+}
 
 if (command === "discover") {
     emit({

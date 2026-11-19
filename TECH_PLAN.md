@@ -691,7 +691,7 @@ CREATE TABLE compositions(id TEXT PK, project_id TEXT, json TEXT, updated_at INT
 | 期 | 状态 | 说明 |
 |---|---|---|
 | **M0** | 基本完成 | daemon（零依赖）+ 项目目录存储（JSON Canvas 1.0）+ 鉴权/Origin 白名单 + 剥离 data/blob + web 双向同步 + `smoke.mjs` 20 项。<br>剩余：视口虚拟化（并入 M1）。 |
-| **M1** | 进行中（后端完成） | 已完成：**资产层**（上传→`assets/<sha256>`、Range 读取、内容去重，web 侧图片/视频/音频全部改走 daemon）＋**run 引擎**（`solgrid run` 提交、`runs get` 轮询、幂等键落盘、启动恢复、产物自动落地、记账）＋**工具目录缓存**（discover/inspect 24h）＋ `smoke-runs.mjs` 11 项（假 CLI，不花钱）。<br>剩余：删渠道/模型脚本子系统；节点改存 `{provider,endpoint,params}` + schema 驱动表单 + raw JSON 兜底；画布生成入口接到 `/api/runs`。 |
+| **M1** | 基本完成（可生成） | 已完成：**画布生成闭环**（节点选 provider/endpoint → daemon 按 family 转请求体 → 参考素材 `files upload` → 排队 → 产物落 assets → 节点回填）＋确认弹窗；**资产层**（上传→`assets/<sha256>`、Range 读取、内容去重，web 侧图片/视频/音频全部改走 daemon）＋**run 引擎**（`solgrid run` 提交、`runs get` 轮询、幂等键落盘、启动恢复、产物自动落地、记账）＋**工具目录缓存**（discover/inspect 24h）＋ `smoke-runs.mjs` 11 项（假 CLI，不花钱）。<br>剩余：删除渠道/模型脚本子系统与 `/image` `/video` 工作台；参数表单 schema 驱动 + raw JSON 编辑 UI；文本/音频生成接入。 |
 | M2 | 未开始 | ACP client + MCP server |
 | M3 / M3b / M4 / M5 | 未开始 | 技能 / 编辑层 / 时间线 / 发布 |
 

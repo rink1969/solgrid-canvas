@@ -54,6 +54,11 @@ export type CanvasNodeMetadata = {
     generationMode?: CanvasGenerationMode;
     generationType?: CanvasImageGenerationType;
     model?: string;
+    // solgrid 平台调用坐标（不走渠道）：选了它就由 daemon 排队调用
+    provider?: string;
+    endpoint?: string;
+    toolTitle?: string;
+    rawBody?: string;
     reasoningEffort?: "auto" | "low" | "medium" | "high" | "xhigh";
     size?: string;
     quality?: string;
