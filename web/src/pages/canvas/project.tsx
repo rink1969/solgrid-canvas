@@ -2123,14 +2123,38 @@ function InfiniteCanvasPage() {
         [message, t],
     );
 
+    // 图片编辑（蒙版局部修改、多角度等）统一走 solgrid：参考图用节点/蒙版资产的 storageKey
+    const runSolgridImageEdit = useCallback(
+        async ({ node, prompt, references, childId, signal }: { node: CanvasNodeData; prompt: string; references: string[]; childId: string; signal: AbortSignal }) => {
+            const config = useConfigStore.getState().config;
+            const provider = node.metadata?.provider || config.defaultImageTool?.provider;
+            const endpoint = node.metadata?.endpoint || config.defaultImageTool?.endpoint;
+            if (!provider || !endpoint) throw new Error("还没有默认生图模型：请到设置 → 渠道 里选一个");
+            const { run } = await createRun({
+                projectId,
+                nodeId: childId,
+                provider,
+                endpoint,
+                params: { prompt, references: references.filter(Boolean), count: 1, size: node.metadata?.size },
+            });
+            solgridRunIdsRef.current.set(childId, run.id);
+            try {
+                const final = await waitRun(run.id, signal);
+                if (final.status !== "completed") throw new Error(final.error || `生成失败（${final.status}）`);
+                const output = final.outputs?.[0];
+                if (!output) throw new Error("平台没有返回产物");
+                const meta = await readImageMeta(output.url);
+                return { url: output.url, storageKey: output.storageKey, width: meta.width, height: meta.height, bytes: output.bytes, mimeType: output.mime, provider, endpoint };
+            } finally {
+                solgridRunIdsRef.current.delete(childId);
+            }
+        },
+        [projectId],
+    );
+
     const maskEditImageNode = useCallback(
         async (node: CanvasNodeData, payload: CanvasImageMaskEditPayload) => {
             if (!node.metadata?.content) return;
-            const generationConfig = { ...buildGenerationConfig(effectiveConfig, node, "image"), count: "1", size: node.metadata?.size || "auto" };
-            if (payload.generate && !isAiConfigReady(generationConfig, generationConfig.model)) {
-                openConfigDialog(true);
-                return;
-            }
             const userPrompt = payload.prompt.trim();
             const prompt = t("canvas.projectPage.maskPrompt", { source: imageReferenceLabel(0), mask: imageReferenceLabel(1), prompt: userPrompt });
             setMaskEditNodeId(null);
@@ -2140,8 +2164,7 @@ function InfiniteCanvasPage() {
             const source = { id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey };
             const maskSource = { id: maskNodeId, name: "mask.png", type: maskImage.mimeType || "image/png", dataUrl: maskImage.url, storageKey: maskImage.storageKey };
             const references = [source, maskSource];
-            const generationMetadata = buildImageGenerationMetadata("edit", generationConfig, 1, references);
-            const childMetadata = payload.generate ? { prompt, status: NODE_STATUS_LOADING, ...generationMetadata } : { prompt };
+            const childMetadata = payload.generate ? { prompt, status: NODE_STATUS_LOADING } : { prompt };
             setNodes((prev) => [
                 ...prev,
                 {
@@ -2175,10 +2198,21 @@ function InfiniteCanvasPage() {
             setRunningNodeId(childId);
             const controller = startGenerationRequest(childId, node.id, childId);
             try {
-                const image = await requestEdit(generationConfig, prompt, references, { signal: controller.signal }).then((items) => items[0]);
-                const uploaded = await uploadImage(image.dataUrl, { signal: controller.signal });
+                const uploaded = await runSolgridImageEdit({
+                    node,
+                    prompt,
+                    references: [source.storageKey, maskSource.storageKey].filter((key): key is string => Boolean(key)),
+                    childId,
+                    signal: controller.signal,
+                });
                 const size = fitNodeSize(uploaded.width, uploaded.height, node.width, node.height);
-                setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, ...generationMetadata } } : item)));
+                setNodes((prev) =>
+                    prev.map((item) =>
+                        item.id === childId
+                            ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, provider: uploaded.provider, endpoint: uploaded.endpoint } }
+                            : item,
+                    ),
+                );
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
                 const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.maskFailed");
@@ -2220,18 +2254,10 @@ function InfiniteCanvasPage() {
     const generateAngleNode = useCallback(
         async (node: CanvasNodeData, params: CanvasImageAngleParams) => {
             if (!node.metadata?.content) return;
-            const generationConfig = { ...buildGenerationConfig(effectiveConfig, node, "image"), count: "1" };
-            if (!isAiConfigReady(generationConfig, generationConfig.model)) {
-                openConfigDialog(true);
-                return;
-            }
             const childId = nanoid();
             const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
             const title = buildAngleLabel(params);
             const prompt = buildAnglePrompt(params);
-            const generationMetadata = buildImageGenerationMetadata("edit", generationConfig, 1, [
-                { id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey },
-            ]);
             setAngleNodeId(null);
             setRunningNodeId(childId);
             setNodes((prev) => [
@@ -2243,7 +2269,7 @@ function InfiniteCanvasPage() {
                     position: { x: node.position.x + node.width + 96, y: node.position.y },
                     width: imageConfig.width,
                     height: imageConfig.height,
-                    metadata: { prompt, status: NODE_STATUS_LOADING, ...generationMetadata },
+                    metadata: { prompt, status: NODE_STATUS_LOADING },
                 },
             ]);
             setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: node.id, toNodeId: childId }]);
@@ -2251,15 +2277,21 @@ function InfiniteCanvasPage() {
             setDialogNodeId(childId);
             const controller = startGenerationRequest(childId, node.id, childId);
             try {
-                const image = await requestEdit(
-                    generationConfig,
+                const uploaded = await runSolgridImageEdit({
+                    node,
                     prompt,
-                    [{ id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey }],
-                    { signal: controller.signal },
-                ).then((items) => items[0]);
-                const uploaded = await uploadImage(image.dataUrl, { signal: controller.signal });
+                    references: node.metadata?.storageKey ? [node.metadata.storageKey] : [],
+                    childId,
+                    signal: controller.signal,
+                });
                 const size = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
-                setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, ...generationMetadata } } : item)));
+                setNodes((prev) =>
+                    prev.map((item) =>
+                        item.id === childId
+                            ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, provider: uploaded.provider, endpoint: uploaded.endpoint } }
+                            : item,
+                    ),
+                );
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
                 const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");
@@ -3078,6 +3110,40 @@ function InfiniteCanvasPage() {
             if (hasResumableVideoTask(node)) {
                 await pollVideoNodeTask(node);
                 return;
+            }
+            // 图片节点：有 solgrid 调用坐标时直接重跑，不再走旧渠道
+            if (node.type === CanvasNodeType.Image) {
+                const runtimeConfig = useConfigStore.getState().config;
+                const provider = node.metadata?.provider || runtimeConfig.defaultImageTool?.provider;
+                const endpoint = node.metadata?.endpoint || runtimeConfig.defaultImageTool?.endpoint;
+                const retryPrompt = (node.metadata?.prompt || "").trim();
+                if (provider && endpoint && retryPrompt) {
+                    setRunningNodeId(node.id);
+                    setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined } } : item)));
+                    const controller = startGenerationRequest(node.id, node.id, node.id);
+                    try {
+                        const references = node.metadata?.generationType === "edit" && node.metadata?.storageKey ? [node.metadata.storageKey] : [];
+                        const uploaded = await runSolgridImageEdit({ node, prompt: retryPrompt, references, childId: node.id, signal: controller.signal });
+                        const size = fitNodeSize(uploaded.width, uploaded.height, node.width, node.height);
+                        setNodes((prev) =>
+                            prev.map((item) =>
+                                item.id === node.id
+                                    ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt: retryPrompt, provider: uploaded.provider, endpoint: uploaded.endpoint } }
+                                    : item,
+                            ),
+                        );
+                    } catch (error) {
+                        if (!isGenerationCanceled(error)) {
+                            const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");
+                            message.error(errorDetails);
+                            setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item)));
+                        }
+                    } finally {
+                        finishGenerationRequest(node.id, controller);
+                        setRunningNodeId(null);
+                    }
+                    return;
+                }
             }
             const sourceNode = findRetrySourceNode(node.id, nodesRef.current, connectionsRef.current) || node;
             const savedImageMetadata = node.type === CanvasNodeType.Image ? node.metadata : undefined;
