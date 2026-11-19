@@ -685,3 +685,14 @@ CREATE TABLE compositions(id TEXT PK, project_id TEXT, json TEXT, updated_at INT
 - 缺失：全仓无"提示词优化"实现；局部重绘是"蒙版当第二张参考图 + 提示词约束"（`pages/canvas/project.tsx` `maskEditImageNode`）。
 - 性能根因：图片/视频以 dataURL 存在 `node.metadata.content`，每次 `setNodes` 整文档序列化写 localforage。
 - 平台侧：`solgrid inspect -p alibaba -e /v1/image/qwen-image-3.0 --json` 的 body 只有 `image/prompt/size/n`（无 mask）；`solgrid discover -q inpaint` 仅命中 stability 音频 inpaint。
+
+## 11. 实施进度
+
+| 期 | 状态 | 说明 |
+|---|---|---|
+| **M0** | 进行中 | 已完成：daemon 骨架（零依赖 http）+ 项目目录存储（`project.json` / `canvas.json` JSON Canvas 1.0 / `assets/`）+ 鉴权与 Origin 白名单 + 写入剥离 dataURL + web 双向同步（初次全量、增量 PUT/DELETE、SSE 广播）+ `daemon/smoke.mjs` 14 项自测。<br>未完成：视口虚拟化、删除渠道/模型脚本子系统（并入 M1）。 |
+| M1 | 未开始 | 极简运行引擎 + catalog 缓存 + schema 表单 + 资产落地 |
+| M2 | 未开始 | ACP client + MCP server |
+| M3 / M3b / M4 / M5 | 未开始 | 技能 / 编辑层 / 时间线 / 发布 |
+
+> 代码进展以 `git log` 为准；本表只记录相对方案的偏差与剩余项。
