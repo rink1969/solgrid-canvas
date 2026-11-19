@@ -78,7 +78,7 @@ README 的四步使用流程，翻译成工程要求：
 | 官方节点插件（html / markdown / panorama / sticky-note / svg / template） | `plugins/canvas/*` | 插件写法有现成范本 |
 | 本地 Agent 雏形（HTTP+SSE，127.0.0.1，token + Origin 钉住，MCP tools，Codex app-server） | `canvas-agent/` | 安全模型可复用；**Codex 私有协议那层要换成 ACP** |
 | Codex app 插件（marketplace） | `plugins/infinite-canvas` | 分发形态样板 |
-| 文档站（fumadocs）、Docker、CI、`AGENTS.md` 工程纪律 | `docs/`、`AGENTS.md`、`.github/` | 直接沿用 |
+| 文档站（fumadocs）、Docker、CI 配置 | `docs/`、`.github/`、`Dockerfile` | 可用则用；`AGENTS.md` 不继承，已按本项目重写 |
 
 ### 3.2 我们放弃的两块（fork 相对上游多出的 2 个 commit）
 
@@ -102,7 +102,7 @@ README 的四步使用流程，翻译成工程要求：
 
 **判断**：这是**架构改造 + 四个新子系统**（运行引擎、资产落地、时间线、Agent 桥），不是小修；但改造成本远低于重写画布 UI。
 
-> ⚠️ **治理项（M0 必须先做）**：上游 `AGENTS.md` 写着"外部服务请求统一放在 `web/src/services/api/`，由浏览器前端直连，不假设存在项目后端"。这与本方案的 daemon 架构直接冲突。M0 第一件事就是**改写这条规则**并补上"资产不落浏览器""项目目录即事实源"，否则后续所有实现都会被它反向约束。
+> ✅ **治理项已落地**：仓库 `AGENTS.md` 已**按本项目重写**，不再继承上游规则。上游那条"外部服务请求放 `web/src/services/api/`、浏览器前端直连、不假设项目后端"已删除，替换为本项目的九条架构铁律（项目目录即事实源、节点只存 `assetId`、只有 daemon 花钱、生成只走 CLI、默认单点串行、模型=调用坐标、ACP 进 MCP 出、图与时间线分离、付费必须确认）。**上游的其他规范同样不再作为约束**：可以大改、删功能、改数据结构，只保留代码起点与许可证义务。
 
 ---
 
@@ -543,12 +543,12 @@ solgrid-canvas/            # = 上游 v0.20.0 基线 + 我们的增量
 ├── notes/                 # 从 fork 移植的实测知识（不参与构建）
 │   ├── solgrid-findings.md
 │   └── lapian-methodology.md
-├── docs/                  # 上游 fumadocs 文档站（按 AGENTS.md 的文档流程维护）
-├── AGENTS.md              # 上游工程纪律 + M0 必改的两条（§3.3 治理项）
+├── docs/                  # 上游 fumadocs 文档站（保留可用，内容按本项目管理）
+├── AGENTS.md              # **本项目自有的开发约束**（九条架构铁律 + 前端/daemon/文档规范，已不继承上游）
 └── REQUIREMENTS.md / TECH_PLAN.md
 ```
 
-**保留上游的工程纪律**（`AGENTS.md`）：最小改动、不写兼容层、不改无关文件、"改行为边界值先确认"、`CHANGELOG` / `pending-test` 流程、不代为构建。
+**工程纪律**：以本项目 `AGENTS.md` 为准——最小改动、不写兼容层、不改无关文件、改边界值先确认、"写完不代为构建"、`CHANGELOG` 流程。上游原有规范不再约束本项目；只保留 MIT 许可证义务（署名与许可声明）。
 
 ---
 
@@ -610,7 +610,7 @@ CREATE TABLE compositions(id TEXT PK, project_id TEXT, json TEXT, updated_at INT
 
 | 期 | 内容 | 验收标准 |
 |---|---|---|
-| **M0 骨架**（1w） | 改写 `AGENTS.md` 冲突规则（§3.3 治理项）；daemon 骨架 + pnpm workspace；web 接上 daemon；doc store + op + SSE；token/Origin；**存储重构为项目目录 + `assetId`（不做数据迁移）** | 两个标签页同步编辑同一画布；刷新不丢；非法 Origin 被拒；项目目录可用文件管理器/Agent 直接看 |
+| **M0 骨架**（1w） | `AGENTS.md` 已重写为本项目约束；daemon 骨架 + pnpm workspace；web 接上 daemon；doc store + op + SSE；token/Origin；**存储重构为项目目录 + `assetId`（不做数据迁移）** | 两个标签页同步编辑同一画布；刷新不丢；非法 Origin 被拒；项目目录可用文件管理器/Agent 直接看 |
 | **M1 单节点闭环**（2w） | 极简运行引擎（§5.2.1 三件不可砍）；catalog 缓存 + schema 表单 + **raw JSON 兜底**；资产落地；成本字段 | 画布点 Run 出图出视频；生成中刷新/重启 daemon 不丢任务；断网重试不重复扣费；**平台上任意一个 endpoint（包括完全陌生的、只填 raw JSON 参数的）都能跑通且不改代码**；500 节点 + 200 资产的项目打开/拖拽不掉帧 |
 | **M2 Agent 闭环**（2w） | ACP client + MCP server（12 工具，经 `session/new.mcpServers` 注入）；`install --agent`；codex / claude / dsh 三路走同一个 ACP 实现；`canvas_place_artifacts`；花费确认挂在 `request_permission` 上 | 在 dsh 里说"在这画布上出一个 3 帧分镜"Agent 能建节点并生成；画布侧栏能看 ACP 流式过程；Agent 未经审批无法花钱（permission 弹窗挡住）；画布不持有任何模型凭证 |
 | **M3 技能**（2w） | 技能上下文契约；拉片技能包（**仅 Agent 执行态**，不搬旧插件）；随包 SKILL.md | 画布点"在 Agent 中运行拉片"→ 产出自动成组布点；换一个用户自建技能（如"拆解竞品广告"）无需改画布 |
@@ -638,8 +638,7 @@ CREATE TABLE compositions(id TEXT PK, project_id TEXT, json TEXT, updated_at INT
 | 长视频内存/解码 | 预览卡死 | 播放头按需解码；不做全片落地解码；导出在 daemon |
 | 平台没有图像 mask inpaint 端点 | "局部重绘"只能做近似 | 客户端 bbox 局部编辑 + 羽化回贴（§5.9 方案 A）先把体验做出来；同时向平台提带 mask 的 edit 端点需求 |
 | 存储重构（dataURL → assetId）一次到位、不做迁移 | 旧浏览器项目打不开 | 符合 `AGENTS.md`"未上线不写兼容层"的规则；提前告知使用者"新仓库不兼容旧项目"，需要旧画的自己截图/导出 |
-| `AGENTS.md` 与 daemon 架构冲突（"前端直连、不假设后端"） | 后续实现被旧规则反向约束 | M0 第一件事改写该规则 + 补"资产不落浏览器/项目目录即事实源"；新规则直接写进 `AGENTS.md` 对应章节 |
-| 上游继续演进（10.5k 星，活跃） | 长期分叉、合并困难 | `upstream` remote 保留；每期同步一次 `git fetch upstream && git merge upstream/main`；改动集中在 daemon/packages，尽量少碰 `web/src/components/canvas/` 以减少冲突面 |
+| 上游继续演进（10.5k 星，活跃） | 分叉后无法自动合入上游改进 | **明确不合并**（本项目是 solgrid 特化分支）：需要上游的单个修复时 `git cherry-pick`；`upstream` remote 保留用于取代码。**不为"将来好合并"而牺牲设计** |
 | 同源 fork 功能更超前（导演台/全景/Go 后端） | 用户会觉得"为什么不直接用" | 已评估（§3.4）：合并成本高于自建服务端，且要继承他人 roadmap；按需把单个节点能力做成插件补上 |
 
 ---
@@ -658,7 +657,7 @@ CREATE TABLE compositions(id TEXT PK, project_id TEXT, json TEXT, updated_at INT
 上游   https://github.com/basketikun/infinite-canvas.git
 基线   v0.20.0 / 9cd3dea（2026-10-25）
 本仓库 9cd3dea + 文档提交（REQUIREMENTS.md / TECH_PLAN.md / notes/）
-同步   git fetch upstream && git merge upstream/main   # 每期一次；改动尽量收在 daemon/ packages/
+同步   **不合并**；需要上游某个修复时 git cherry-pick <sha>；upstream remote 保留作为代码来源
 ```
 
 - 旧 fork（`D:\data\github\infinite-canvas`，remote 指向 solgrid GitLab）不再参与构建，仅作参考：其两块增量已在本方案 §3.2 判定放弃，知识落到 `notes/`。
