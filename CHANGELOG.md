@@ -4,7 +4,8 @@
 
 + [新增] 新增本地 daemon（零运行时依赖，仅用 Node 内置模块）：画布项目以目录形式落盘，`canvas.json` 采用 JSON Canvas 1.0，节点与连线可被 Agent 和 Obsidian 直接读写；提供项目读写接口与 SSE 变更广播。
 + [调整] 画布项目不再保存在浏览器 localforage，改为由 daemon 托管并双向同步，浏览器只保留内存镜像。
-+ [调整] 画布文档写入时剔除 dataURL，节点只保留 assetId / storageKey；资产层接入前暂不支持内联图片。
++ [调整] 画布文档写入时剔除 dataURL 与 blob URL，节点只保留 assetId / storageKey；资产层接入前暂不支持内联图片。
++ [修复] 画布编辑产生的 `blob:` 临时地址不再写入 canvas.json，避免刷新后出现无法解析的死链。
 
 ## v0.20.0 - 2026-10-10
 

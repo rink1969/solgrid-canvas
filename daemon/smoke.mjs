@@ -68,6 +68,7 @@ try {
         nodes: [
             { id: "n1", type: "text", title: "提示词", position: { x: 10, y: 20 }, width: 320, height: 200, metadata: { content: "一只猫" } },
             { id: "n2", type: "image", title: "结果", position: { x: 400, y: 20 }, width: 320, height: 320, metadata: { content: "data:image/png;base64,AAAAAAAA" } },
+            { id: "n3", type: "image", title: "编辑结果", position: { x: 400, y: 400 }, width: 320, height: 320, metadata: { content: "blob:http://localhost:3000/73577af8", storageKey: "image:abc" } },
         ],
     };
     const put = await api("PUT", "/api/projects/smoke1", { project });
@@ -77,11 +78,12 @@ try {
     check("canvas.json 是 JSON Canvas 结构", Array.isArray(diskCanvas.nodes) && Array.isArray(diskCanvas.edges) && diskCanvas["x-solgrid"]?.format === "solgrid-canvas/1");
     check("边被映射为 fromNode/toNode", diskCanvas.edges[0]?.fromNode === "n1" && diskCanvas.edges[0]?.toNode === "n2");
     check("dataURL 被剥离", !JSON.stringify(diskCanvas).includes("data:image"), JSON.stringify(diskCanvas.nodes[1]));
+    check("blob URL 被剥离且保留 storageKey", !JSON.stringify(diskCanvas).includes("blob:") && diskCanvas.nodes[2]?.["x-solgrid"]?.metadata?.storageKey === "image:abc", JSON.stringify(diskCanvas.nodes[2]));
     check("文本节点带 text 字段", diskCanvas.nodes[0]?.text === "一只猫");
 
     const list = await api("GET", "/api/projects");
     check("列表返回 1 个项目", list.json?.projects?.length === 1);
-    check("读回节点完整", list.json.projects[0].nodes.length === 2 && list.json.projects[0].connections.length === 1);
+    check("读回节点完整", list.json.projects[0].nodes.length === 3 && list.json.projects[0].connections.length === 1);
     check("读回 rev", list.json.projects[0].rev === 1);
 
     const removed = await api("DELETE", "/api/projects/smoke1");

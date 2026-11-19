@@ -59,7 +59,7 @@ CANVAS_TOKEN=<daemon.json 里的 token>
 | DELETE | `/api/projects/:id` | 删除项目目录 |
 | GET | `/api/events?client=<id>` | SSE：`project.updated` / `project.deleted` |
 
-所有 `/api/*` 都需要 `x-canvas-token`。写入时 **dataURL 会被剥离**（画布文档只允许 `assetId`），资产层在 M1 接管。
+所有 `/api/*` 都需要 `x-canvas-token`。写入时 **`data:` / `blob:` 地址会被剥离**（画布文档只允许 `assetId` / `storageKey`），资产层在 M1 接管。`blob:` 只在创建它的标签页存活，写进文档就是死链。
 
 ## 自测
 

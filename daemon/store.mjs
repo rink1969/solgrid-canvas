@@ -31,9 +31,12 @@ function writeJsonAtomic(file, value) {
     fs.renameSync(tmp, file);
 }
 
-// 递归剔除 data: URL（画布文档里只允许 assetId / storageKey）
+// 递归剔除浏览器临时地址（data: / blob:）：画布文档里只允许 assetId / storageKey。
+// blob: URL 只在创建它的标签页存活，写进文档等于写了个死链。
 function stripDataUrls(value, counter) {
-    if (typeof value === "string") return value.startsWith("data:") ? (counter.n++, undefined) : value;
+    if (typeof value === "string") {
+        return value.startsWith("data:") || value.startsWith("blob:") ? (counter.n++, undefined) : value;
+    }
     if (Array.isArray(value)) {
         const next = [];
         for (const item of value) {
