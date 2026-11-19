@@ -44,14 +44,29 @@ export function createRunEngine({ store, gateway, projectsDir, bodyDir, broadcas
         return updated;
     }
 
+    function guessMime(item) {
+        if (item.mime) return item.mime;
+        if (item.hint === "images") return "image/png";
+        if (item.hint === "videos") return "video/mp4";
+        if (item.hint === "audios" || item.hint === "audio" || item.hint === "music") return "audio/mpeg";
+        const url = String(item.url || "");
+        if (/\.mp3(\?|$)/i.test(url)) return "audio/mpeg";
+        if (/\.wav(\?|$)/i.test(url)) return "audio/wav";
+        if (/\.(png|jpe?g|webp|gif)(\?|$)/i.test(url)) return "image/png";
+        if (/\.(mp4|webm|mov)(\?|$)/i.test(url)) return "video/mp4";
+        return "application/octet-stream";
+    }
+
     async function collectOutputs(run, raw) {
         const items = pickOutputs(raw);
         const outputs = [];
         for (const [index, item] of items.entries()) {
-            const mime = item.mime || "application/octet-stream";
+            const mime = guessMime(item);
             const saved = item.base64
                 ? saveAssetFromBuffer(Buffer.from(item.base64, "base64"), projectsDir, run.projectId, mime)
-                : await saveAssetFromUrl(item.url, projectsDir, run.projectId, mime);
+                : item.hex
+                  ? saveAssetFromBuffer(Buffer.from(item.hex, "hex"), projectsDir, run.projectId, mime)
+                  : await saveAssetFromUrl(item.url, projectsDir, run.projectId, mime);
             outputs.push({
                 index,
                 storageKey: `asset:${run.projectId}/${saved.file}`,

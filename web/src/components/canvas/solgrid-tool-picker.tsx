@@ -10,12 +10,24 @@ import type { CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
 // discover 结果缓存到模块级：节点面板频繁挂载时不重复拉起 CLI
 const cache = new Map<string, Promise<SolgridTool[]>>();
 
-function loadTools(mode: "image" | "video") {
-    const query = mode === "video" ? "video generation" : "image generation";
+const QUERY: Record<"image" | "video" | "audio", string> = {
+    image: "image generation",
+    video: "video generation",
+    audio: "text to speech audio",
+};
+
+function matches(mode: "image" | "video" | "audio", endpoint: string) {
+    if (mode === "video") return endpoint.includes("/video/") || endpoint.includes("image-to-video");
+    if (mode === "image") return endpoint.includes("/image/");
+    return /audio|text-to-speech|t2a|speech|music|sound/i.test(endpoint);
+}
+
+function loadTools(mode: "image" | "video" | "audio") {
+    const query = QUERY[mode];
     const cached = cache.get(query);
     if (cached) return cached;
     const promise = listTools(query)
-        .then((items) => items.filter((item) => (mode === "video" ? item.endpoint.includes("/video/") : item.endpoint.includes("/image/"))))
+        .then((items) => items.filter((item) => matches(mode, item.endpoint)))
         .catch((error) => {
             cache.delete(query);
             throw error;
@@ -24,7 +36,7 @@ function loadTools(mode: "image" | "video") {
     return promise;
 }
 
-export function SolgridToolPicker({ node, mode, onChange }: { node: CanvasNodeData; mode: "image" | "video"; onChange: (patch: Partial<CanvasNodeMetadata>) => void }) {
+export function SolgridToolPicker({ node, mode, onChange }: { node: CanvasNodeData; mode: "image" | "video" | "audio"; onChange: (patch: Partial<CanvasNodeMetadata>) => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [tools, setTools] = useState<SolgridTool[]>([]);
     const [loading, setLoading] = useState(true);
@@ -48,7 +60,7 @@ export function SolgridToolPicker({ node, mode, onChange }: { node: CanvasNodeDa
     }, [mode]);
 
     const config = useConfigStore((state) => state.config);
-    const fallback = mode === "video" ? config.defaultVideoTool : config.defaultImageTool;
+    const fallback = mode === "video" ? config.defaultVideoTool : mode === "audio" ? config.defaultAudioTool : config.defaultImageTool;
     const own = node.metadata?.provider && node.metadata?.endpoint ? `${node.metadata.provider}|${node.metadata.endpoint}` : undefined;
     const value = own ?? (fallback ? `${fallback.provider}|${fallback.endpoint}` : undefined);
 

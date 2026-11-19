@@ -91,7 +91,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                 placeholder={t(`canvas.promptPanel.${mode === "image" && hasImageContent ? "editImage" : mode === "text" && hasTextContent ? "editText" : mode}`)}
             />
 
-            {mode === "image" || mode === "video" ? <SolgridParamsEditor node={node} onChange={(patch) => onConfigChange(node.id, patch)} /> : null}
+            {mode === "image" || mode === "video" || mode === "audio" ? <SolgridParamsEditor node={node} onChange={(patch) => onConfigChange(node.id, patch)} /> : null}
 
             <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
@@ -118,7 +118,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                         </>
                     ) : mode === "audio" ? (
                         <>
-                            <span className="text-xs opacity-60">音频生成暂未接入 solgrid</span>
+                            <SolgridToolPicker node={node} mode="audio" onChange={(patch) => onConfigChange(node.id, patch)} />
                             <CanvasAudioSettingsPopover config={config} buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
                         </>
                     ) : (

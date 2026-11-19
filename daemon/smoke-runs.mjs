@@ -194,6 +194,23 @@ try {
     const afterDelete = (await fetch(`${BASE}/api/runs?projectId=smokeproj`, { headers }).then((r) => r.json())).runs.length;
     check("删除运行记录", deleted.ok === true && afterDelete === beforeDelete - 1);
 
+    // 音频：minimax t2a_v2 → voice_setting + hex 音频落地为 mp3
+    const audioRun = await fetch(`${BASE}/api/runs`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ projectId: "smokeproj", provider: "minimax", endpoint: "/v1/t2a_v2", params: { prompt: "你好世界", audioVoice: "female-shaonv", audioSpeed: "1" } }),
+    }).then((r) => r.json());
+    let audioFinished = null;
+    for (let i = 0; i < 40; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        const payload = await fetch(`${BASE}/api/runs/${audioRun.run.id}`, { headers }).then((r) => r.json());
+        audioFinished = payload.run;
+        if (["completed", "failed", "uncertain", "stopped"].includes(audioFinished?.status)) break;
+    }
+    const audioBody = readBodies().find((item) => item?.text === "你好世界");
+    check("音频 body 用 voice_setting", audioBody?.voice_setting?.voice_id === "female-shaonv" && audioBody?.audio_setting?.format === "mp3", JSON.stringify(audioBody).slice(0, 200));
+    check("hex 音频落地为 mp3", audioFinished?.status === "completed" && String(audioFinished?.outputs?.[0]?.file || "").endsWith(".mp3"), JSON.stringify(audioFinished?.outputs));
+
     // 列表与取消
     const list = await fetch(`${BASE}/api/runs?projectId=smokeproj`, { headers }).then((r) => r.json());
     check("run 列表", (list.runs?.length || 0) >= 2 && list.runs.some((item) => item.id === run.id));

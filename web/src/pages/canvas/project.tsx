@@ -147,8 +147,19 @@ function applyGeneratedVideo(item: CanvasNodeData, video: UploadedFile, extra: C
 }
 
 // 用函数而不是内联比较，避免 TypeScript 在提前 return 后把 mode 收窄成 text|audio
-function isMediaGenerationMode(mode: CanvasNodeGenerationMode) {
-    return mode === "image" || mode === "video";
+function isSolgridGenerationMode(mode: CanvasNodeGenerationMode) {
+    return mode === "image" || mode === "video" || mode === "audio";
+}
+
+function probeAudioMeta(url: string) {
+    return new Promise<{ durationMs?: number }>((resolve) => {
+        const audio = document.createElement("audio");
+        const done = () => resolve({ durationMs: Number.isFinite(audio.duration) ? Math.round(audio.duration * 1000) : undefined });
+        audio.onloadedmetadata = done;
+        audio.onerror = done;
+        setTimeout(done, 5000);
+        audio.src = url;
+    });
 }
 
 function probeVideoMeta(url: string) {
@@ -2350,7 +2361,7 @@ function InfiniteCanvasPage() {
 
     // solgrid 生成：节点选了 {provider, endpoint} 时走这里，由 daemon 排队调用平台
     const runSolgridGeneration = useCallback(
-        async (sourceNode: CanvasNodeData, mode: "image" | "video", prompt: string, tool: { provider: string; endpoint: string }) => {
+        async (sourceNode: CanvasNodeData, mode: "image" | "video" | "audio", prompt: string, tool: { provider: string; endpoint: string }) => {
             const nodeId = sourceNode.id;
             const provider = tool.provider;
             const endpoint = tool.endpoint;
@@ -2377,10 +2388,13 @@ function InfiniteCanvasPage() {
                     resolution: sourceNode.metadata?.vquality,
                     generateAudio: sourceNode.metadata?.generateAudio,
                     videoMode: sourceNode.metadata?.videoMode,
+                    audioVoice: sourceNode.metadata?.audioVoice,
+                    audioFormat: sourceNode.metadata?.audioFormat,
+                    audioSpeed: sourceNode.metadata?.audioSpeed,
                 };
                 const confirmed = await new Promise<boolean>((resolve) => {
                     Modal.confirm({
-                        title: mode === "video" ? "确认生成视频" : "确认生成图片",
+                        title: mode === "video" ? "确认生成视频" : mode === "audio" ? "确认生成音频" : "确认生成图片",
                         content: `${provider} · ${endpoint}\n费用以 solgrid 平台实际计费为准。`,
                         okText: "生成",
                         cancelText: "取消",
@@ -2395,7 +2409,27 @@ function InfiniteCanvasPage() {
                 const output = final.outputs?.[0];
                 if (!output) throw new Error("平台没有返回产物");
 
-                if (mode === "image") {
+                if (mode === "audio") {
+                    const audioMeta = await probeAudioMeta(output.url);
+                    setNodes((prev) =>
+                        prev.map((node) =>
+                            node.id === nodeId
+                                ? {
+                                      ...node,
+                                      metadata: {
+                                          ...node.metadata,
+                                          ...audioMetadata({ url: output.url, storageKey: output.storageKey, bytes: output.bytes, mimeType: output.mime || "audio/mpeg", durationMs: audioMeta.durationMs }),
+                                          prompt: context.prompt,
+                                          provider,
+                                          endpoint,
+                                          status: NODE_STATUS_SUCCESS,
+                                          errorDetails: undefined,
+                                      },
+                                  }
+                                : node,
+                        ),
+                    );
+                } else if (mode === "image") {
                     const meta = await readImageMeta(output.url);
                     setNodes((prev) =>
                         prev.map((node) =>
@@ -2454,10 +2488,10 @@ function InfiniteCanvasPage() {
         async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => {
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
             // 图片/视频一律走 solgrid：节点自己选了模型就用节点的，否则用设置里的默认模型
-            if (isMediaGenerationMode(mode) && sourceNode) {
+            if (isSolgridGenerationMode(mode) && sourceNode) {
                 const own = sourceNode.metadata?.provider && sourceNode.metadata?.endpoint ? { provider: sourceNode.metadata.provider, endpoint: sourceNode.metadata.endpoint } : null;
                 const config = useConfigStore.getState().config;
-                const fallback = mode === "video" ? config.defaultVideoTool : config.defaultImageTool;
+                const fallback = mode === "video" ? config.defaultVideoTool : mode === "audio" ? config.defaultAudioTool : config.defaultImageTool;
                 const tool = own ?? (fallback ? { provider: fallback.provider, endpoint: fallback.endpoint } : null);
                 if (!tool) {
                     message.warning("还没有默认模型：请到设置 → 渠道 里选一个，或在节点上单独选择");

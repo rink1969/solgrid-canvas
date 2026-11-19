@@ -166,15 +166,33 @@ export function createGateway() {
     };
 }
 
-export function pickOutputs(raw) {
-    const output = raw?.output || raw?.run?.output || {};
-    const candidates = [...(output.images || []), ...(output.videos || []), ...(output.files || []), ...(output.audios || [])];
-    const items = [];
-    for (const item of candidates) {
-        if (!item || typeof item !== "object") continue;
-        if (item.base64) items.push({ base64: item.base64, mime: item.mime || item.mimeType || "image/png" });
-        else if (item.url) items.push({ url: item.url, mime: item.mime || item.mimeType || "application/octet-stream" });
+function asItem(value, hint) {
+    if (value == null) return null;
+    if (typeof value === "string") {
+        if (/^https?:\/\//i.test(value)) return { url: value, hint };
+        if (/^[0-9a-f]{200,}$/i.test(value)) return { hex: value, hint };
+        if (value.length > 100) return { base64: value, hint };
+        return null;
     }
+    if (Array.isArray(value)) return value.flatMap((item) => asItem(item, hint) || []);
+    return typeof value === "object" ? { ...value, hint } : null;
+}
+
+export function pickOutputs(raw) {
+    const value = raw?.output || raw?.run?.output || raw?.data?.output || raw?.data || raw || {};
+    const items = [];
+    for (const key of ["images", "videos", "audios", "files", "audio", "music"]) {
+        const candidate = value[key];
+        if (candidate == null) continue;
+        const list = Array.isArray(candidate) ? candidate : [candidate];
+        for (const entry of list) {
+            const item = asItem(entry, key);
+            if (item) items.push(item);
+        }
+    }
+    // 有些厂商把音频塞在 data.audio（hex 字符串）
+    const nested = asItem(value.data?.audio, "audio");
+    if (nested) items.push(nested);
     return items;
 }
 

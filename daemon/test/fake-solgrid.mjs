@@ -42,7 +42,7 @@ if (command === "run") {
     // 把 daemon 生成的请求体留档，冒烟测试据此校验 family 映射
     const inputFile = flag("-f");
     if (inputFile && fs.existsSync(inputFile)) fs.copyFileSync(inputFile, path.join(stateDir, "bodies", `${id}.json`));
-    writeRun({ id, polls: 0, key });
+    writeRun({ id, polls: 0, key, endpoint: flag("-e") });
     if (key) fs.writeFileSync(path.join(stateDir, "keys", key), id);
     emit({ id, status: "READY", idempotencyKey: key });
 }
@@ -61,12 +61,13 @@ if (command === "runs" && argv[1] === "get") {
     run.polls += 1;
     writeRun(run);
     if (run.polls <= pollLimit) emit({ id, status: "RUNNING", cost: null });
+    const isAudio = /t2a|text-to-speech|stable-audio/.test(String(run.endpoint || ""));
     emit({
         id,
         status: "COMPLETED",
         cost: 3.9,
         billingStatus: "SETTLED",
-        output: { images: [{ base64: TINY_PNG, mime: "image/png" }] },
+        output: isAudio ? { audio: `49443303${"00".repeat(400)}` } : { images: [{ base64: TINY_PNG, mime: "image/png" }] },
     });
 }
 

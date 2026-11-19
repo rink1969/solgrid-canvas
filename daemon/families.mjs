@@ -110,10 +110,41 @@ function seedanceVideo({ params, mediaUrls }) {
     return body;
 }
 
+const OPENAI_VOICES = new Set(["alloy", "echo", "fable", "onyx", "nova", "shimmer"]);
+
+function audioFamily({ params, endpoint }) {
+    const prompt = String(params.prompt || "").trim();
+    if (!prompt) throw invalid("音频生成需要文本：填在节点的提示词里");
+    const voice = String(params.audioVoice || "").trim();
+    const format = String(params.audioFormat || "mp3").toLowerCase();
+    const speed = Math.max(0.5, Math.min(2, Number(params.audioSpeed) || 1));
+
+    if (endpoint.includes("/text-to-speech")) {
+        const voiceId = voice.length >= 10 && !OPENAI_VOICES.has(voice) ? voice : "21m00Tcm4TlvDq8ikWAM";
+        return { voice_id: voiceId, text: prompt, model_id: "eleven_multilingual_v2" };
+    }
+
+    if (endpoint.includes("/t2a_v2")) {
+        const voiceId = voice && !OPENAI_VOICES.has(voice) ? voice : "male-qn-qingse";
+        return {
+            text: prompt,
+            voice_setting: { voice_id: voiceId, speed, vol: 1, pitch: 0 },
+            audio_setting: { format: ["mp3", "pcm", "flac", "wav"].includes(format) ? format : "mp3", sample_rate: 32000, bitrate: 128000 },
+            stream: false,
+        };
+    }
+
+    const body = { prompt, output_format: "mp3" };
+    const seconds = Number(params.seconds);
+    if (seconds > 0) body.duration = Math.min(seconds, 190);
+    return body;
+}
+
 const FAMILIES = [
     { id: "alibaba-image", match: (provider, endpoint) => provider === "alibaba" && endpoint.startsWith("/v1/image/"), build: alibabaImage },
     { id: "alibaba-wan-video", match: (provider, endpoint) => provider === "alibaba" && /^\/v1\/video\/wan2\.7-(i2v|t2v|r2v)$/.test(endpoint), build: wanVideo },
     { id: "bytedance-seedance", match: (provider, endpoint) => provider === "bytedance" && endpoint.startsWith("/v1/video/seedance"), build: seedanceVideo },
+    { id: "audio", match: (provider, endpoint) => /text-to-speech|t2a_v2|stable-audio\/text-to-audio|\/v1\/music$|\/v1\/sound-generation$/.test(endpoint), build: audioFamily },
 ];
 
 export function buildBody({ provider, endpoint, params, mediaUrls }) {

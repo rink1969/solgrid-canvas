@@ -201,7 +201,7 @@ async function handle(req, res) {
                     if (seen.has(id)) continue;
                     seen.add(id);
                     const endpoint = String(item.endpoint);
-                    const bucket = /image-to-video|\/video\//.test(endpoint) ? "video" : /\/image\//.test(endpoint) ? "image" : /audio|t2a|tts|music|speech/i.test(endpoint) ? "audio" : null;
+                    const bucket = /image-to-video|\/video\//.test(endpoint) ? "video" : /\/image\//.test(endpoint) ? "image" : /audio|t2a|tts|music|speech|sound/i.test(endpoint) ? "audio" : null;
                     if (!bucket) continue;
                     buckets[bucket].push({ provider: item.provider, endpoint, description: item.description, price: item.price });
                 }
