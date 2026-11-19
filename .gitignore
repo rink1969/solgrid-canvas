@@ -15,3 +15,5 @@ web/public/plugins
 plugins/canvas/*/dist
 plugins/canvas/*/node_modules
 web/public/plugins
+# 根目录只有脚本，没有依赖；npm 偶尔生成的锁文件不入库
+/package-lock.json

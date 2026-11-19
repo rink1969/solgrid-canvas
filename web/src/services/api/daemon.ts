@@ -16,14 +16,17 @@ function withClient(path: string) {
     return `${path}${path.includes("?") ? "&" : "?"}client=${encodeURIComponent(clientId)}`;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+type RequestOptions = { method?: string; body?: string };
+
+async function request<T>(path: string, init: RequestOptions = {}): Promise<T> {
     const response = await fetch(`${BASE}${withClient(path)}`, {
-        ...init,
-        headers: { "content-type": "application/json", ...(init?.headers || {}) },
+        method: init.method,
+        body: init.body,
+        headers: { "content-type": "application/json" },
     });
     if (!response.ok) {
         const detail = await response.text().catch(() => "");
-        throw new Error(`daemon ${init?.method || "GET"} ${path} → ${response.status} ${detail}`.trim());
+        throw new Error(`daemon ${init.method || "GET"} ${path} → ${response.status} ${detail}`.trim());
     }
     return (await response.json()) as T;
 }
