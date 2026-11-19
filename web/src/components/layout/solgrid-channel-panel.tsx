@@ -1,36 +1,22 @@
 import { useEffect, useState } from "react";
-import { Button, Select, Tag } from "antd";
+import { Button, Tag } from "antd";
 import { RefreshCw } from "lucide-react";
 
-import { listCatalog, type SolgridCatalog, type SolgridTool } from "@/services/api/solgrid";
-import { useConfigStore, type ToolRef } from "@/stores/use-config-store";
-
-function toRef(tool: SolgridTool): ToolRef {
-    return { provider: tool.provider, endpoint: tool.endpoint, title: `${tool.provider} · ${tool.endpoint}` };
-}
-
-function toValue(tool?: ToolRef) {
-    return tool ? `${tool.provider}|${tool.endpoint}` : undefined;
-}
-
-function fromValue(value: string): ToolRef {
-    const [provider, endpoint] = value.split("|");
-    return { provider, endpoint, title: `${provider} · ${endpoint}` };
-}
+import { listCatalog, type SolgridCatalog } from "@/services/api/solgrid";
 
 const capabilityLabel: Record<keyof SolgridCatalog, string> = {
-    image: "生图模型",
-    video: "生视频模型",
-    audio: "音频模型",
+    image: "生图",
+    video: "生视频",
+    audio: "音频",
 };
 
-// 内置渠道：没有 baseUrl / apiKey，模型列表来自 daemon 缓存的平台目录。
+// 渠道列表：目前只有内置的 Solgrid 一个渠道，只读展示与模型清单。
+// 默认模型在「偏好设置」里配置。
 export function SolgridChannelPanel() {
-    const defaults = useConfigStore((state) => state.config);
-    const setDefaultTool = useConfigStore((state) => state.setDefaultTool);
     const [catalog, setCatalog] = useState<SolgridCatalog>({ image: [], video: [], audio: [] });
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
+    const [expanded, setExpanded] = useState<keyof SolgridCatalog | null>(null);
 
     const load = (refresh = false) => {
         setLoading(true);
@@ -45,14 +31,10 @@ export function SolgridChannelPanel() {
         load(false);
     }, []);
 
-    const options = (tools: SolgridTool[]) =>
-        tools.map((tool) => ({
-            value: `${tool.provider}|${tool.endpoint}`,
-            label: `${tool.provider} · ${tool.endpoint}`,
-        }));
+    const total = catalog.image.length + catalog.video.length + catalog.audio.length;
 
     return (
-        <div className="space-y-5">
+        <div className="space-y-4">
             <div className="rounded-lg border border-stone-200 px-4 py-3 dark:border-stone-800">
                 <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
@@ -61,7 +43,7 @@ export function SolgridChannelPanel() {
                             <Tag color="blue">默认</Tag>
                         </div>
                         <div className="mt-1 text-xs text-stone-500">
-                            通过本机已登录的 solgrid CLI 调用，不需要填 API Key。模型列表由平台目录决定，平台新增模型无需升级画布。
+                            通过本机已登录的 solgrid CLI 调用，不需要填 API Key；共 {total} 个模型（生图 {catalog.image.length} / 生视频 {catalog.video.length} / 音频 {catalog.audio.length}）。
                         </div>
                     </div>
                     <Button size="small" icon={<RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />} onClick={() => load(true)} loading={loading}>
@@ -71,53 +53,31 @@ export function SolgridChannelPanel() {
                 {error ? <div className="mt-2 text-xs text-red-500">{error}</div> : null}
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                    <div className="mb-2 text-sm font-semibold">默认生图模型</div>
-                    <Select
-                        className="w-full"
-                        placeholder="选择默认生图模型"
-                        loading={loading}
-                        allowClear
-                        value={toValue(defaults.defaultImageTool)}
-                        options={options(catalog.image)}
-                        onChange={(value?: string) => setDefaultTool("image", value ? fromValue(value) : null)}
-                        showSearch
-                        optionFilterProp="label"
-                    />
-                    <div className="mt-1 text-xs text-stone-500">新建图片节点或节点未单独选模型时使用</div>
-                </div>
-                <div>
-                    <div className="mb-2 text-sm font-semibold">默认生视频模型</div>
-                    <Select
-                        className="w-full"
-                        placeholder="选择默认生视频模型"
-                        loading={loading}
-                        allowClear
-                        value={toValue(defaults.defaultVideoTool)}
-                        options={options(catalog.video)}
-                        onChange={(value?: string) => setDefaultTool("video", value ? fromValue(value) : null)}
-                        showSearch
-                        optionFilterProp="label"
-                    />
-                    <div className="mt-1 text-xs text-stone-500">新建视频节点或节点未单独选模型时使用</div>
-                </div>
-            </div>
-
             {(["image", "video", "audio"] as const).map((capability) => (
-                <div key={capability}>
-                    <div className="mb-2 text-sm font-semibold">
-                        {capabilityLabel[capability]}（{catalog[capability].length}）
-                    </div>
-                    <div className="max-h-72 space-y-1 overflow-y-auto rounded-lg border border-stone-200 px-3 py-2 text-xs dark:border-stone-800">
-                        {catalog[capability].length === 0 ? <div className="py-2 text-stone-500">暂无数据</div> : null}
-                        {catalog[capability].map((tool) => (
-                            <div key={`${tool.provider}|${tool.endpoint}`} className="flex items-center justify-between gap-3 py-1">
-                                <span className="truncate font-mono">{tool.provider} · {tool.endpoint}</span>
-                                <span className="shrink-0 truncate text-stone-500">{tool.description || ""}</span>
-                            </div>
-                        ))}
-                    </div>
+                <div key={capability} className="rounded-lg border border-stone-200 dark:border-stone-800">
+                    <button
+                        type="button"
+                        className="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm"
+                        onClick={() => setExpanded((current) => (current === capability ? null : capability))}
+                    >
+                        <span className="font-medium">
+                            {capabilityLabel[capability]}模型（{catalog[capability].length}）
+                        </span>
+                        <span className="text-xs text-stone-500">{expanded === capability ? "收起" : "查看"}</span>
+                    </button>
+                    {expanded === capability ? (
+                        <div className="max-h-80 space-y-1 overflow-y-auto border-t border-stone-200 px-4 py-2 text-xs dark:border-stone-800">
+                            {catalog[capability].length === 0 ? <div className="py-2 text-stone-500">暂无数据</div> : null}
+                            {catalog[capability].map((tool) => (
+                                <div key={`${tool.provider}|${tool.endpoint}`} className="flex items-center justify-between gap-3 py-1">
+                                    <span className="truncate font-mono">
+                                        {tool.provider} · {tool.endpoint}
+                                    </span>
+                                    <span className="shrink-0 truncate text-stone-500">{tool.description || ""}</span>
+                                </div>
+                            ))}
+                        </div>
+                    ) : null}
                 </div>
             ))}
         </div>

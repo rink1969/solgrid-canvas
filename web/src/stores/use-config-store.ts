@@ -35,6 +35,7 @@ export type AiConfig = {
     channels: ModelChannel[];
     defaultImageTool?: ToolRef;
     defaultVideoTool?: ToolRef;
+    defaultAudioTool?: ToolRef;
     model: string;
     imageModel: string;
     videoModel: string;
@@ -147,7 +148,7 @@ type ConfigStore = {
     configTab: ConfigTabKey;
     shouldPromptContinue: boolean;
     updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
-    setDefaultTool: (capability: "image" | "video", tool: ToolRef | null) => void;
+    setDefaultTool: (capability: "image" | "video" | "audio", tool: ToolRef | null) => void;
     importChannelCredentials: (input: { baseUrl?: string | null; apiKey?: string | null }) => ChannelCredentialsImportResult;
     updateWebdavConfig: <K extends keyof WebdavSyncConfig>(key: K, value: WebdavSyncConfig[K]) => void;
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
@@ -230,7 +231,11 @@ export const useConfigStore = create<ConfigStore>()(
                 set((state) => ({
                     config: {
                         ...state.config,
-                        ...(capability === "image" ? { defaultImageTool: tool || undefined } : { defaultVideoTool: tool || undefined }),
+                        ...(capability === "image"
+                            ? { defaultImageTool: tool || undefined }
+                            : capability === "video"
+                              ? { defaultVideoTool: tool || undefined }
+                              : { defaultAudioTool: tool || undefined }),
                     },
                 })),
             updateConfig: (key, value) =>
