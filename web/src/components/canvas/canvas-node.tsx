@@ -47,6 +47,7 @@ type CanvasNodeProps = {
     onResizeEnd: (nodeId: string) => void;
     onContentChange: (nodeId: string, content: string) => void;
     onTitleChange: (nodeId: string, title: string) => void;
+    onTitleHover?: (nodeId: string, active: boolean) => void;
     onToggleBatch?: (nodeId: string) => void;
     onSetBatchPrimary?: (nodeId: string, itemId: string) => void;
     onDuplicateBatchImage?: (node: CanvasNodeData, imageId: string) => void;
@@ -112,6 +113,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     onResizeEnd,
     onContentChange,
     onTitleChange,
+    onTitleHover,
     onToggleBatch,
     onSetBatchPrimary,
     onDuplicateBatchImage,
@@ -298,7 +300,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     return (
         <div
             data-node-id={data.id}
-            className={`node-element group/node absolute flex select-none flex-col transition-shadow duration-200 ${isGroup ? "z-[5]" : isEditingTitle ? "z-[75]" : isSelected ? "z-50" : "z-10"} ${referenceSelectionState === "available" ? "cursor-pointer" : referenceSelectionState ? "cursor-not-allowed" : ""}`}
+            className={`node-element group/node absolute flex select-none flex-col transition-shadow duration-200 ${isGroup ? "z-[5]" : isEditingTitle || hovered || isSelected ? "z-[75]" : "z-10"} ${referenceSelectionState === "available" ? "cursor-pointer" : referenceSelectionState ? "cursor-not-allowed" : ""}`}
             style={{
                 transform: `translate(${data.position.x}px, ${data.position.y}px)`,
                 width: data.width,
@@ -328,6 +330,8 @@ export const CanvasNode = React.memo(function CanvasNode({
                     onMouseDown={(event) => event.stopPropagation()}
                     onPointerDown={(event) => event.stopPropagation()}
                     onDoubleClick={(event) => event.stopPropagation()}
+                    onMouseEnter={() => onTitleHover?.(data.id, true)}
+                    onMouseLeave={() => onTitleHover?.(data.id, false)}
                 >
                     {isEditingTitle ? (
                         <input
