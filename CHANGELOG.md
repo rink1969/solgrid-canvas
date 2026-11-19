@@ -6,6 +6,10 @@
 + [调整] 画布项目不再保存在浏览器 localforage，改为由 daemon 托管并双向同步，浏览器只保留内存镜像。
 + [调整] 画布文档写入时剔除 dataURL 与 blob URL，节点只保留 assetId / storageKey；资产层接入前暂不支持内联图片。
 + [修复] 画布编辑产生的 `blob:` 临时地址不再写入 canvas.json，避免刷新后出现无法解析的死链。
++ [新增] daemon 新增资产层：上传即写入 `projects/<id>/assets/<sha256>.<ext>`（内容寻址去重），读取支持 Range；图片、视频、音频不再保存到浏览器 IndexedDB。
++ [新增] daemon 新增 run 队列：`solgrid run` 提交 → `runs get` 轮询 → 产物自动落地 → 记账 cost；幂等键入队落盘、启动可恢复。
++ [新增] daemon 新增工具目录接口（`discover` / `inspect`，缓存 24 小时），供画布动态生成模型与参数表单。
++ [调整] 节点 `storageKey` 改为 `asset:<projectId>/<sha256>.<ext>`，与项目目录里的资产文件一一对应。
 
 ## v0.20.0 - 2026-10-10
 

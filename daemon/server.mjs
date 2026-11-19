@@ -7,6 +7,10 @@ import os from "node:os";
 import path from "node:path";
 
 import { createStore } from "./store.mjs";
+import { receiveAsset, serveAsset } from "./assets.mjs";
+import { createCatalogCache, createRunStore, openDb } from "./db.mjs";
+import { createGateway } from "./gateway.mjs";
+import { createRunEngine } from "./runs.mjs";
 
 const VERSION = "0.1.0";
 const PORT = Number(process.env.CANVAS_PORT || 17371);
@@ -95,6 +99,23 @@ function broadcast(event, exceptClientId) {
     }
 }
 
+// ---- run 引擎（M1）----
+const db = openDb(ROOT);
+const runStore = createRunStore(db);
+const catalog = createCatalogCache(db);
+const gateway = createGateway();
+const bodyDir = path.join(ROOT, "tmp");
+fs.mkdirSync(bodyDir, { recursive: true });
+const engine = createRunEngine({
+    store: runStore,
+    gateway,
+    projectsDir: store.projectsDir,
+    bodyDir,
+    broadcast,
+    log,
+});
+void engine.recover();
+
 // ---- 路由 ----
 async function handle(req, res) {
     const url = new URL(req.url, `http://${HOST}`);
@@ -139,6 +160,93 @@ async function handle(req, res) {
             clearInterval(heartbeat);
             clients.delete(client);
         });
+        return;
+    }
+
+    // ---- 工具目录：discover / inspect（缓存 24h，失败时退回旧缓存）----
+    if (pathname === "/api/tools" && req.method === "GET") {
+        const query = String(url.searchParams.get("q") || "").trim();
+        if (!query) return sendJson(res, 400, { error: "missing_query" });
+        const key = `discover:${query}`;
+        try {
+            const results = await gateway.discover(query);
+            catalog.put(key, results);
+            return sendJson(res, 200, { results, cached: false });
+        } catch (error) {
+            const stale = catalog.get(key);
+            if (stale) return sendJson(res, 200, { results: stale, cached: true, warning: error.message });
+            return sendJson(res, 502, { error: "solgrid_unavailable", message: error.message });
+        }
+    }
+
+    if (pathname === "/api/tools/detail" && req.method === "GET") {
+        const provider = String(url.searchParams.get("provider") || "").trim();
+        const endpoint = String(url.searchParams.get("endpoint") || "").trim();
+        if (!provider || !endpoint) return sendJson(res, 400, { error: "missing_provider_or_endpoint" });
+        const key = `inspect:${provider}:${endpoint}`;
+        try {
+            const detail = await gateway.inspect(provider, endpoint);
+            catalog.put(key, detail);
+            return sendJson(res, 200, { detail, cached: false });
+        } catch (error) {
+            const stale = catalog.get(key);
+            if (stale) return sendJson(res, 200, { detail: stale, cached: true, warning: error.message });
+            return sendJson(res, 502, { error: "solgrid_unavailable", message: error.message });
+        }
+    }
+
+    // ---- run 队列 ----
+    if (pathname === "/api/runs" && req.method === "GET") {
+        const projectId = url.searchParams.get("projectId") || "";
+        const limit = Math.min(Number(url.searchParams.get("limit") || 100), 500);
+        return sendJson(res, 200, { runs: runStore.list(projectId || null, limit) });
+    }
+
+    if (pathname === "/api/runs" && req.method === "POST") {
+        let body;
+        try {
+            body = JSON.parse(await readBody(req));
+        } catch (error) {
+            return sendJson(res, 400, { error: "invalid_json", message: error.message });
+        }
+        const { projectId, nodeId, provider, endpoint } = body || {};
+        if (!projectId || !provider || !endpoint) return sendJson(res, 400, { error: "missing_fields", hint: "需要 projectId / provider / endpoint" });
+        const run = engine.enqueue({ projectId, nodeId, provider, endpoint, body: body.body ?? {} });
+        return sendJson(res, 200, { run });
+    }
+
+    const runMatch = pathname.match(/^\/api\/runs\/([0-9a-f-]{36})$/);
+    if (runMatch && req.method === "GET") {
+        const run = runStore.get(runMatch[1]);
+        if (!run) return sendJson(res, 404, { error: "not_found" });
+        return sendJson(res, 200, { run });
+    }
+
+    const cancelMatch = pathname.match(/^\/api\/runs\/([0-9a-f-]{36})\/cancel$/);
+    if (cancelMatch && req.method === "POST") {
+        const run = runStore.get(cancelMatch[1]);
+        if (!run) return sendJson(res, 404, { error: "not_found" });
+        const updated = await engine.cancel(run);
+        return sendJson(res, 200, { run: updated });
+    }
+
+    // 资产上传：body 为原始二进制，mime 走 query（浏览器 fetch 的 content-type 可直接用）
+    const assetUpload = pathname.match(/^\/api\/projects\/([A-Za-z0-9_-]{1,64})\/assets$/);
+    if (assetUpload && req.method === "POST") {
+        const mime = String(url.searchParams.get("mime") || req.headers["content-type"] || "application/octet-stream").split(";")[0].trim();
+        try {
+            const saved = await receiveAsset(req, store.projectsDir, assetUpload[1], mime);
+            return sendJson(res, 200, saved);
+        } catch (error) {
+            log("asset upload failed:", error.message);
+            return sendJson(res, 400, { error: "asset_upload_failed", message: error.message });
+        }
+    }
+
+    // 资产读取：支持 Range（视频拖动进度必需）
+    const assetGet = pathname.match(/^\/api\/projects\/([A-Za-z0-9_-]{1,64})\/assets\/([a-f0-9]{64}\.[a-z0-9]{2,5})$/);
+    if (assetGet && req.method === "GET") {
+        serveAsset(req, res, store.projectsDir, assetGet[1], assetGet[2]);
         return;
     }
 

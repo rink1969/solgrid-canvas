@@ -1,7 +1,7 @@
 import localforage from "localforage";
 
-import { nanoid } from "nanoid";
 import i18n from "@/i18n";
+import { assetKeyToUrl, fetchAssetBlob, isAssetKey, uploadAsset } from "@/services/api/assets";
 import { withLocalProxy } from "@/stores/use-config-store";
 import { createImageThumbnail } from "@/lib/image-thumbnail";
 
@@ -50,21 +50,25 @@ export async function uploadImage(input: string | Blob, options?: ImageReadOptio
 }
 
 async function storeImage(blob: Blob, options?: ImageReadOptions): Promise<UploadedImage> {
-    const storageKey = `image:${nanoid()}`;
-    const url = URL.createObjectURL(blob);
+    // 图片直接落到项目的 assets/（内容寻址），浏览器只保留缩略图缓存
+    const localUrl = URL.createObjectURL(blob);
     try {
-        const meta = await loadImageMeta(url, options);
+        const meta = await loadImageMeta(localUrl, options);
         if (!meta) throw new Error(i18n.t("common.imageReadFailed"));
         throwIfAborted(options?.signal);
-        await store.setItem(storageKey, blob);
+        const asset = await uploadAsset(blob);
         throwIfAborted(options?.signal);
-        objectUrls.set(storageKey, url);
-        await storeImagePreview(storageKey, blob);
-        return { url, storageKey, width: meta.width, height: meta.height, bytes: blob.size, mimeType: blob.type.startsWith("image/") ? blob.type : "" };
-    } catch (error) {
-        URL.revokeObjectURL(url);
-        await store.removeItem(storageKey).catch(() => undefined);
-        throw error;
+        await storeImagePreview(asset.storageKey, blob);
+        return {
+            url: asset.url,
+            storageKey: asset.storageKey,
+            width: meta.width,
+            height: meta.height,
+            bytes: asset.bytes,
+            mimeType: asset.mime.startsWith("image/") ? asset.mime : "",
+        };
+    } finally {
+        URL.revokeObjectURL(localUrl);
     }
 }
 
@@ -142,6 +146,8 @@ function throwIfAborted(signal?: AbortSignal) {
 
 export async function resolveImageUrl(storageKey?: string, fallback = "") {
     if (!storageKey) return fallback;
+    // 资产已在项目 assets/ 里，直接用 daemon 地址，不再需要 object URL
+    if (isAssetKey(storageKey)) return assetKeyToUrl(storageKey) || fallback;
     const cached = objectUrls.get(storageKey);
     if (cached) return cached;
     const blob = await store.getItem<Blob>(storageKey);
@@ -152,6 +158,7 @@ export async function resolveImageUrl(storageKey?: string, fallback = "") {
 }
 
 export async function getImageBlob(storageKey: string) {
+    if (isAssetKey(storageKey)) return fetchAssetBlob(storageKey);
     return store.getItem<Blob>(storageKey);
 }
 
@@ -214,6 +221,12 @@ async function deleteImagePreview(storageKey: string) {
 }
 
 export async function setImageBlob(storageKey: string, blob: Blob) {
+    if (isAssetKey(storageKey)) {
+        // 资产不可原地覆盖（内容寻址），再次写入会生成新的 asset 并返回它自己的地址
+        const asset = await uploadAsset(blob);
+        await storeImagePreview(asset.storageKey, blob);
+        return asset.url;
+    }
     await store.setItem(storageKey, blob);
     await deleteImagePreview(storageKey);
     await storeImagePreview(storageKey, blob);
@@ -235,6 +248,8 @@ export async function deleteStoredImages(keys: Iterable<string>) {
             if (url) URL.revokeObjectURL(url);
             objectUrls.delete(key);
             await deleteImagePreview(key);
+            // 资产文件由项目目录管理，不在这里删除（同一内容可能被多个节点引用）
+            if (isAssetKey(key)) return;
             await store.removeItem(key);
         }),
     );
@@ -263,7 +278,7 @@ export async function cleanupUnusedImages(usedData: unknown) {
 
 export function collectImageStorageKeys(value: unknown, keys = new Set<string>()) {
     if (!value || typeof value !== "object") return keys;
-    if ("storageKey" in value && typeof value.storageKey === "string" && value.storageKey.startsWith("image:")) keys.add(value.storageKey);
+    if ("storageKey" in value && typeof value.storageKey === "string" && (value.storageKey.startsWith("image:") || isAssetKey(value.storageKey))) keys.add(value.storageKey);
     Object.values(value).forEach((item) => (Array.isArray(item) ? item.forEach((child) => collectImageStorageKeys(child, keys)) : collectImageStorageKeys(item, keys)));
     return keys;
 }

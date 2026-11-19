@@ -1,6 +1,6 @@
-# canvas daemon（M0）
+# canvas daemon（M0 + M1 后端）
 
-本地 daemon 是 solgrid canvas 的执行与存储中心：画布项目落地在本机文件系统，后续的 run 队列、资产落地、ACP/MCP 桥都挂在这里。
+本地 daemon 是 solgrid canvas 的执行与存储中心：画布项目与资产生成物落在本机文件系统，生成任务走这里的队列。
 
 零运行时依赖：只用 Node 内置模块（`http` / `fs` / `crypto`），**不需要 npm install**。
 
@@ -40,10 +40,12 @@ CANVAS_TOKEN=<daemon.json 里的 token>
 ```
 ~/.solgrid-canvas/
 ├── daemon.json                 # { token }
+├── canvas.db                   # run 账本 + 工具目录缓存（node:sqlite）
+├── tmp/                        # 提交给 CLI 的 body 临时文件
 └── projects/<id>/
     ├── project.json            # 元信息：标题/时间/背景/视口/rev
     ├── canvas.json             # JSON Canvas 1.0：nodes + edges，扩展字段在 x-solgrid
-    └── assets/                 # 内容寻址资产（M1 接入）
+    └── assets/                 # 内容寻址资产：<sha256>.<ext> + <sha256>.json
 ```
 
 `canvas.json` 是标准 **JSON Canvas 1.0**：节点用 `id/type/x/y/width/height/text/file`，连线用 `fromNode/toNode`；solgrid 的原始节点类型、标题、生成参数放在 `x-solgrid` 里。**Agent 与 Obsidian 都能直接读写这个文件。**
@@ -57,14 +59,24 @@ CANVAS_TOKEN=<daemon.json 里的 token>
 | GET | `/api/projects/:id` | 单项目 |
 | PUT | `/api/projects/:id` | 保存项目（body: `{project}`），返回 `rev` |
 | DELETE | `/api/projects/:id` | 删除项目目录 |
-| GET | `/api/events?client=<id>` | SSE：`project.updated` / `project.deleted` |
+| GET | `/api/events?client=<id>` | SSE：`project.updated` / `project.deleted` / `run.updated` |
+| POST | `/api/projects/:id/assets?mime=…` | 上传二进制，返回 `{assetId,file,bytes}` |
+| GET | `/api/projects/:id/assets/:file` | 读取资产（支持 Range） |
+| GET | `/api/tools?q=…` | `solgrid discover` 结果（缓存 24h） |
+| GET | `/api/tools/detail?provider=&endpoint=` | `solgrid inspect` 契约（缓存 24h） |
+| POST | `/api/runs` | 入队生成：`{projectId,nodeId?,provider,endpoint,body}` |
+| GET | `/api/runs?projectId=` | run 列表（状态 / cost / 产物） |
+| GET | `/api/runs/:id` | 单个 run |
+| POST | `/api/runs/:id/cancel` | 取消（可 stop 则 stop 远端） |
 
 所有 `/api/*` 都需要 `x-canvas-token`。写入时 **`data:` / `blob:` 地址会被剥离**（画布文档只允许 `assetId` / `storageKey`），资产层在 M1 接管。`blob:` 只在创建它的标签页存活，写进文档就是死链。
 
 ## 自测
 
 ```bash
-node daemon/smoke.mjs
+node daemon/smoke.mjs       # 存储 / 鉴权 / 资产（20 项）
+node daemon/smoke-runs.mjs  # run 队列 / 产物落地 / 记账（用假 CLI，11 项，不花钱）
 ```
 
-起临时实例 → 鉴权 / 读写 / JSON Canvas 结构 / dataURL 剥离 / 路径穿越 → 清理，14 项检查。
+`smoke-runs.mjs` 通过 `CANVAS_SOLGRID_BIN` 指向 `daemon/test/fake-solgrid.mjs`，不联网、不扣费。
+真实 CLI 路径由 `CANVAS_SOLGRID_BIN` 默认值 `solgrid` 使用；Windows 上经 shell 执行 `.cmd`，进入命令行的参数都会先做字符白名单校验。

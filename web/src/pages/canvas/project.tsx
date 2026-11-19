@@ -10,6 +10,7 @@ import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audi
 import { createVideoGenerationTask, isVideoTaskFailed, storeGeneratedVideo, waitForVideoGenerationTask } from "@/services/api/video";
 import { defaultConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { ensureImagePreview, uploadImage } from "@/services/image-storage";
+import { setActiveProjectId } from "@/lib/canvas/active-project";
 import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
@@ -474,6 +475,12 @@ function InfiniteCanvasPage() {
         };
         void restore();
     }, [hydrated, navigate, openProject, projectId]);
+
+    useEffect(() => {
+        // 资产落在当前项目的 assets/；离开页面后回到 _inbox
+        setActiveProjectId(projectId);
+        return () => setActiveProjectId(null);
+    }, [projectId]);
 
     useEffect(() => {
         if (!projectLoaded) return;

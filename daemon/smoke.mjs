@@ -86,6 +86,27 @@ try {
     check("读回节点完整", list.json.projects[0].nodes.length === 3 && list.json.projects[0].connections.length === 1);
     check("读回 rev", list.json.projects[0].rev === 1);
 
+    // ---- 资产：上传 / 去重 / 读取 / Range ----
+    const png = Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63600000020001e621bc330000000049454e44ae426082", "hex");
+    const uploadAsset = async (buffer, mime) => {
+        const response = await fetch(`${BASE}/api/projects/smoke1/assets?mime=${encodeURIComponent(mime)}`, {
+            method: "POST",
+            headers: { "x-canvas-token": TOKEN, "content-type": mime },
+            body: buffer,
+        });
+        return { status: response.status, json: await response.json() };
+    };
+    const first = await uploadAsset(png, "image/png");
+    check("资产上传", first.status === 200 && /^[a-f0-9]{64}\.png$/.test(first.json.file), JSON.stringify(first.json));
+    const second = await uploadAsset(png, "image/png");
+    check("同内容去重", first.json.file === second.json.file);
+    check("assets 目录有文件", fs.existsSync(path.join(HOME, "projects", "smoke1", "assets", first.json.file)));
+    const assetResponse = await fetch(`${BASE}/api/projects/smoke1/assets/${first.json.file}`, { headers: { "x-canvas-token": TOKEN } });
+    const assetBytes = Buffer.from(await assetResponse.arrayBuffer());
+    check("资产读取", assetResponse.status === 200 && assetBytes.equals(png));
+    const rangeResponse = await fetch(`${BASE}/api/projects/smoke1/assets/${first.json.file}`, { headers: { "x-canvas-token": TOKEN, range: "bytes=0-7" } });
+    check("Range 请求", rangeResponse.status === 206 && (rangeResponse.headers.get("content-range") || "").startsWith("bytes 0-7/"));
+
     const removed = await api("DELETE", "/api/projects/smoke1");
     check("删除项目", removed.status === 200 && !fs.existsSync(path.join(HOME, "projects", "smoke1")));
     check("删除后列表为空", (await api("GET", "/api/projects")).json?.projects?.length === 0);
