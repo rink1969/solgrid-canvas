@@ -51,12 +51,15 @@ export const daemonApi = {
 };
 
 export type DaemonEvent = {
-    type: "hello" | "project.updated" | "project.ops" | "project.deleted" | "approval.requested" | "approval.decided";
+    type: "hello" | "project.updated" | "project.ops" | "project.deleted" | "approval.requested" | "approval.decided" | "agent.event";
     id?: string;
     rev?: number;
     ops?: number;
     approval?: unknown;
     status?: string;
+    projectId?: string;
+    kind?: string;
+    update?: unknown;
     clientId?: string;
     version?: string;
 };

@@ -55,6 +55,8 @@ node bin/solgrid-canvas.mjs install --agent codex   # 或 claude / dsh
 node bin/solgrid-canvas.mjs doctor          # 检查环境
 ```
 
+画布右下角还有「Agent」入口：在画布内直接和本地 Agent 对话（ACP），它同样带着画布工具，可以边聊边改。
+
 装好后在 Agent 里直接说：“在画布上建 3 个文本节点连成链”“读一下我选中的节点”“把这几张图放到视频节点右边”“生成这个图片节点”。Agent 发起生成时画布会弹确认框，你点允许才会计费。
 
 ## 文档

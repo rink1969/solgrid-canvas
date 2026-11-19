@@ -83,6 +83,21 @@ node bin/solgrid-canvas.mjs install --agent codex|claude|dsh
 
 注册的是 stdio MCP：`node daemon/mcp.mjs`。它不重复实现业务，全部转发给 daemon；daemon 没起时会自动拉起。工具包括 `canvas_get_state` / `canvas_apply_ops` / `canvas_place_artifacts` / `canvas_import_local` / `canvas_run_nodes` / `canvas_watch_run` / `canvas_cancel_run` 等。
 
+## 画布 → Agent（ACP）
+
+```bash
+curl -XPOST /api/agent/start   -d '{"projectId":"…"}'   # 建会话（注入 canvas MCP）
+curl -XPOST /api/agent/prompt  -d '{"projectId":"…","text":"…"}'
+curl      /api/agent/transcript?projectId=…
+curl -XPOST /api/agent/cancel  -d '{"projectId":"…"}'
+curl -XPOST /api/agent/model   -d '{"projectId":"…","configId":"model","value":"…"}'
+curl -XPOST /api/agent/permissions/:id -d '{"allow":true}'
+```
+
+- 默认适配器：本机 DSH 桌面版（`ELECTRON_RUN_AS_NODE=1 <exe> resources/app.asar/.../bin.js --profile acp`）
+- 自定义：`CANVAS_ACP_COMMAND` + `CANVAS_ACP_ARGS`（JSON 数组）
+- 会话在内存里，daemon 重启后新建；模型/凭证来自 Agent 自身
+
 ## 生成审批
 
 ```

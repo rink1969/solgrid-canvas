@@ -11,6 +11,7 @@ import { receiveAsset, serveAsset } from "./assets.mjs";
 import { createCatalogCache, createOpLog, createRunStore, openDb } from "./db.mjs";
 import { applyOps, normalizeOps } from "./ops.mjs";
 import { createApprovalStore } from "./approvals.mjs";
+import { createAgentManager } from "./acp.mjs";
 import { createGateway } from "./gateway.mjs";
 import { createRunEngine } from "./runs.mjs";
 
@@ -121,6 +122,7 @@ const engine = createRunEngine({
 });
 void engine.recover();
 const approvals = createApprovalStore({ engine, broadcast, log });
+const agent = createAgentManager({ broadcast, log });
 
 // ---- 路由 ----
 async function handle(req, res) {
@@ -236,6 +238,90 @@ async function handle(req, res) {
             if (stale) return sendJson(res, 200, { detail: stale, cached: true, warning: error.message });
             return sendJson(res, 502, { error: "solgrid_unavailable", message: error.message });
         }
+    }
+
+    // ---- Agent（ACP）：画布 → 本地 Agent ----
+    if (pathname === "/api/agent/status" && req.method === "GET") {
+        return sendJson(res, 200, agent.status());
+    }
+
+    if (pathname === "/api/agent/start" && req.method === "POST") {
+        let body;
+        try {
+            body = JSON.parse(await readBody(req));
+        } catch (error) {
+            return sendJson(res, 400, { error: "invalid_json", message: error.message });
+        }
+        const projectId = body?.projectId;
+        if (!projectId) return sendJson(res, 400, { error: "missing_project" });
+        if (!store.readProject(projectId)) return sendJson(res, 404, { error: "not_found" });
+        try {
+            const session = await agent.ensureSession(projectId, path.join(store.projectsDir, projectId));
+            return sendJson(res, 200, { sessionId: session.sessionId, configOptions: session.configOptions });
+        } catch (error) {
+            return sendJson(res, 502, { error: "agent_unavailable", message: error.message });
+        }
+    }
+
+    if (pathname === "/api/agent/transcript" && req.method === "GET") {
+        const projectId = url.searchParams.get("projectId") || "";
+        return sendJson(res, 200, { transcript: agent.transcript(projectId) });
+    }
+
+    if (pathname === "/api/agent/prompt" && req.method === "POST") {
+        let body;
+        try {
+            body = JSON.parse(await readBody(req));
+        } catch (error) {
+            return sendJson(res, 400, { error: "invalid_json", message: error.message });
+        }
+        const { projectId, text } = body || {};
+        if (!projectId || !text) return sendJson(res, 400, { error: "missing_fields" });
+        try {
+            await agent.ensureSession(projectId, path.join(store.projectsDir, projectId));
+            await agent.prompt(projectId, text);
+            return sendJson(res, 200, { ok: true });
+        } catch (error) {
+            return sendJson(res, 400, { error: "agent_prompt_failed", message: error.message });
+        }
+    }
+
+    if (pathname === "/api/agent/cancel" && req.method === "POST") {
+        let body;
+        try {
+            body = JSON.parse(await readBody(req));
+        } catch (error) {
+            return sendJson(res, 400, { error: "invalid_json", message: error.message });
+        }
+        await agent.cancel(body?.projectId).catch(() => undefined);
+        return sendJson(res, 200, { ok: true });
+    }
+
+    if (pathname === "/api/agent/model" && req.method === "POST") {
+        let body;
+        try {
+            body = JSON.parse(await readBody(req));
+        } catch (error) {
+            return sendJson(res, 400, { error: "invalid_json", message: error.message });
+        }
+        try {
+            const configOptions = await agent.setModel(body?.projectId, body?.configId || "model", body?.value);
+            return sendJson(res, 200, { configOptions });
+        } catch (error) {
+            return sendJson(res, 400, { error: "agent_model_failed", message: error.message });
+        }
+    }
+
+    const permMatch = pathname.match(/^\/api\/agent\/permissions\/([A-Za-z0-9-]{1,64})$/);
+    if (permMatch && req.method === "POST") {
+        let body;
+        try {
+            body = JSON.parse(await readBody(req));
+        } catch (error) {
+            return sendJson(res, 400, { error: "invalid_json", message: error.message });
+        }
+        const ok = agent.decidePermission(permMatch[1], Boolean(body?.allow));
+        return sendJson(res, ok ? 200 : 404, { ok });
     }
 
     // ---- 生成审批（Agent 花钱前必须由用户确认）----
@@ -433,5 +519,6 @@ server.listen(PORT, HOST, () => {
 
 process.on("SIGINT", () => {
     log("shutting down");
+    agent.close();
     server.close(() => process.exit(0));
 });

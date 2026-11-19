@@ -12,7 +12,8 @@
         "doctor": "node bin/solgrid-canvas.mjs doctor",
         "smoke:store": "node daemon/smoke.mjs",
         "smoke:runs": "node daemon/smoke-runs.mjs",
-        "smoke:mcp": "node daemon/smoke-mcp.mjs"
+        "smoke:mcp": "node daemon/smoke-mcp.mjs",
+        "smoke:agent": "node daemon/smoke-agent.mjs"
     },
     "bin": {
         "solgrid-canvas": "bin/solgrid-canvas.mjs"
