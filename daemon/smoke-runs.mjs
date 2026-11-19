@@ -59,6 +59,27 @@ try {
     const detail = await fetch(`${BASE}/api/tools/detail?provider=fake&endpoint=/v1/fake-image`, { headers }).then((r) => r.json());
     check("inspect 返回 schema", detail.detail?.input?.body?.properties?.prompt?.type === "string");
 
+    // 先建一个带节点的项目，验证 run 完成后回填节点（刷新页面不丢结果）
+    await fetch(`${BASE}/api/projects/smokeproj`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({
+            project: {
+                id: "smokeproj",
+                title: "冒烟项目",
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                backgroundMode: "lines",
+                showImageInfo: false,
+                viewport: { x: 0, y: 0, k: 1 },
+                chatSessions: [],
+                activeChatId: null,
+                connections: [],
+                nodes: [{ id: "node1", type: "image", title: "图", position: { x: 0, y: 0 }, width: 320, height: 320, metadata: { status: "loading" } }],
+            },
+        }),
+    });
+
     // 提交 run
     const created = await fetch(`${BASE}/api/runs`, {
         method: "POST",
@@ -82,6 +103,11 @@ try {
     const outputFile = path.join(HOME, "projects", "smokeproj", "assets", run.outputs[0].file);
     check("产物文件存在", fs.existsSync(outputFile), outputFile);
     check("产物 storageKey 可拼地址", run.outputs[0].url === `/api/projects/smokeproj/assets/${run.outputs[0].file}`);
+
+    // 节点回填：daemon 完成 run 时把结果写进 canvas.json
+    const projectAfterRun = await fetch(`${BASE}/api/projects/smokeproj`, { headers }).then((r) => r.json());
+    const nodeAfterRun = projectAfterRun.project?.nodes?.find((node) => node.id === "node1");
+    check("run 完成回填节点", nodeAfterRun?.metadata?.status === "success" && String(nodeAfterRun?.metadata?.storageKey || "").startsWith("asset:smokeproj/"), JSON.stringify(nodeAfterRun?.metadata).slice(0, 200));
 
     // family 映射：图片请求体
     const bodiesDir = path.join(HOME, "fake-state", "bodies");

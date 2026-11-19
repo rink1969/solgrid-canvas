@@ -11,6 +11,7 @@ import path from "node:path";
 import { saveAssetFromBuffer, saveAssetFromUrl } from "./assets.mjs";
 import { buildBody } from "./families.mjs";
 import { pickCost, pickOutputs, tempBodyPath } from "./gateway.mjs";
+import { applyOps } from "./ops.mjs";
 
 const POLL_START_MS = 2000;
 const POLL_MAX_MS = 8000;
@@ -30,15 +31,30 @@ function sanitizeParams(value) {
     return value;
 }
 
-export function createRunEngine({ store, gateway, projectsDir, bodyDir, broadcast, log }) {
+export function createRunEngine({ store, gateway, projectsDir, bodyDir, broadcast, log, docStore, opLog }) {
     let busy = false;
 
     function emit(run) {
         broadcast?.({ type: "run.updated", run });
     }
 
+    // 把结果写回画布文档：刷新页面后节点也能显示结果（不再停留在 loading）
+    function patchNode(run, patch) {
+        if (!run.nodeId || !docStore) return;
+        try {
+            // patch 是节点 metadata 的字段（content/storageKey/status…），不是节点顶层字段
+            const op = { type: "update_node", id: run.nodeId, patch: { metadata: patch } };
+            const result = applyOps(docStore, run.projectId, [op]);
+            opLog?.append(run.projectId, [op], "daemon");
+            broadcast?.({ type: "project.ops", id: run.projectId, rev: result.rev, ops: 1, clientId: "daemon" });
+        } catch (error) {
+            log(`run ${run.id} 回填节点失败：${error.message}`);
+        }
+    }
+
     function fail(run, message, status = "failed") {
         const updated = store.update(run.id, { status, error: message, finishedAt: new Date().toISOString() });
+        patchNode(run, { status: "error", errorDetails: message });
         log(`run ${run.id} ${status}: ${message}`);
         emit(updated);
         return updated;
@@ -55,6 +71,36 @@ export function createRunEngine({ store, gateway, projectsDir, bodyDir, broadcas
         if (/\.(png|jpe?g|webp|gif)(\?|$)/i.test(url)) return "image/png";
         if (/\.(mp4|webm|mov)(\?|$)/i.test(url)) return "video/mp4";
         return "application/octet-stream";
+    }
+
+    // 只读文件头 64KB 解析尺寸，避免为了宽高把大图整个读进来
+    function imageSizeOf(run, output) {
+        try {
+            const file = path.join(projectsDir, run.projectId, "assets", output.file);
+            const fd = fs.openSync(file, "r");
+            const buffer = Buffer.alloc(65536);
+            const read = fs.readSync(fd, buffer, 0, buffer.length, 0);
+            fs.closeSync(fd);
+            const bytes = buffer.subarray(0, read);
+            if (output.mime === "image/png" && bytes.length > 24) return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+            if (output.mime === "image/jpeg") {
+                let offset = 2;
+                while (offset + 9 < bytes.length) {
+                    if (bytes[offset] !== 0xff) {
+                        offset += 1;
+                        continue;
+                    }
+                    const marker = bytes[offset + 1];
+                    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+                        return { width: bytes.readUInt16BE(offset + 7), height: bytes.readUInt16BE(offset + 5) };
+                    }
+                    offset += 2 + bytes.readUInt16BE(offset + 2);
+                }
+            }
+            return null;
+        } catch {
+            return null;
+        }
     }
 
     async function collectOutputs(run, raw) {
@@ -112,6 +158,22 @@ export function createRunEngine({ store, gateway, projectsDir, bodyDir, broadcas
                     billingStatus,
                     finishedAt: new Date().toISOString(),
                 });
+                const first = outputs[0];
+                if (first) {
+                    const size = first.mime?.startsWith("image/") ? imageSizeOf(run, first) : null;
+                    patchNode(run, {
+                        content: first.url,
+                        storageKey: first.storageKey,
+                        status: "success",
+                        bytes: first.bytes,
+                        mimeType: first.mime,
+                        ...(size ? { naturalWidth: size.width, naturalHeight: size.height } : {}),
+                        prompt: run.body?.prompt,
+                        provider: run.provider,
+                        endpoint: run.endpoint,
+                        errorDetails: undefined,
+                    });
+                }
                 log(`run ${run.id} completed（${outputs.length} 个产物，cost=${cost ?? "?"}）`);
                 emit(updated);
                 return updated;

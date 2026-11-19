@@ -4,10 +4,7 @@ import { Cloud, Download, Pencil, Plus, RefreshCw, Trash2, Upload, Wifi } from "
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { ModelPicker } from "@/components/model-picker";
 import { videoResolutionOptions } from "@/components/video-settings-panel";
-import { ChannelEditorDrawer } from "@/components/layout/channel-editor-drawer";
-import { ConfigLocalProxy } from "@/components/layout/config-local-proxy";
 import { SolgridChannelPanel } from "@/components/layout/solgrid-channel-panel";
 import { SolgridDefaultModels } from "@/components/layout/solgrid-default-models";
 import { ConfigPromptSources } from "@/components/layout/config-prompt-sources";
@@ -191,11 +188,6 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
                         children: <SolgridChannelPanel />,
                     },
                     {
-                        key: "local-proxy",
-                        label: t("config.tabs.localProxy"),
-                        children: <ConfigLocalProxy />,
-                    },
-                    {
                         key: "preferences",
                         label: t("config.tabs.preferences"),
                         children: (
@@ -328,7 +320,6 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
                     </Button>
                 </div>
             ) : null}
-            <ChannelEditorDrawer open={Boolean(editingChannel)} channel={editingChannel} onSave={saveChannel} onClose={() => setEditingChannelId("")} />
         </>
     );
 }

@@ -2,7 +2,6 @@ import localforage from "localforage";
 
 import i18n from "@/i18n";
 import { assetKeyToUrl, fetchAssetBlob, isAssetKey, uploadAsset } from "@/services/api/assets";
-import { withLocalProxy } from "@/stores/use-config-store";
 import { createImageThumbnail } from "@/lib/image-thumbnail";
 
 export type UploadedImage = {
@@ -83,7 +82,7 @@ async function fetchImageBlob(url: string, options?: ImageReadOptions) {
         controller.abort();
     }, IMAGE_DOWNLOAD_TIMEOUT_MS);
     try {
-        const response = await fetch(withLocalProxy(url), { signal: controller.signal });
+        const response = await fetch(url, { signal: controller.signal });
         if (!response.ok) throw namedError(IMAGE_RESPONSE_ERROR);
         return await response.blob();
     } catch (error) {

@@ -115,6 +115,8 @@ const engine = createRunEngine({
     bodyDir,
     broadcast,
     log,
+    docStore: store,
+    opLog,
 });
 void engine.recover();
 

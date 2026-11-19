@@ -6,7 +6,7 @@ import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
 
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
-import { createRun, waitRun } from "@/services/api/solgrid";
+import { cancelRun, createRun, waitRun } from "@/services/api/solgrid";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { createVideoGenerationTask, isVideoTaskFailed, storeGeneratedVideo, waitForVideoGenerationTask } from "@/services/api/video";
 import { defaultConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
@@ -313,6 +313,8 @@ function InfiniteCanvasPage() {
     const selectionBoxRef = useRef(selectionBox);
     const pendingConnectionCreateRef = useRef(pendingConnectionCreate);
     const generationRequestsRef = useRef(new Map<string, CanvasGenerationRequest>());
+    // solgrid 生成：节点 -> runId，停止时要取消远端（否则平台继续计费）
+    const solgridRunIdsRef = useRef(new Map<string, string>());
     const videoPollIdsRef = useRef(new Set<string>());
 
     const createHistoryEntry = useCallback(
@@ -435,6 +437,13 @@ function InfiniteCanvasPage() {
         });
         setRunningNodeId((current) => (current === runningId ? null : current));
         if (!affectedNodeIds.size) return;
+        // solgrid 的 run 在 daemon 队列里，必须显式取消远端，否则平台继续跑并计费
+        affectedNodeIds.forEach((nodeId) => {
+            const runId = solgridRunIdsRef.current.get(nodeId);
+            if (!runId) return;
+            solgridRunIdsRef.current.delete(nodeId);
+            void cancelRun(runId).catch(() => undefined);
+        });
         setNodes((prev) =>
             prev.map((node) =>
                 affectedNodeIds.has(node.id) && node.metadata?.status === NODE_STATUS_LOADING
@@ -2404,10 +2413,12 @@ function InfiniteCanvasPage() {
                 });
                 if (!confirmed) return;
                 const { run } = await createRun({ projectId, nodeId, provider, endpoint, params });
+                solgridRunIdsRef.current.set(nodeId, run.id);
                 const final = await waitRun(run.id, controller.signal);
                 if (final.status !== "completed") throw new Error(final.error || `生成失败（${final.status}）`);
-                const output = final.outputs?.[0];
-                if (!output) throw new Error("平台没有返回产物");
+                const outputs = final.outputs || [];
+                if (!outputs.length) throw new Error("平台没有返回产物");
+                const [output, ...extraOutputs] = outputs;
 
                 if (mode === "audio") {
                     const audioMeta = await probeAudioMeta(output.url);
@@ -2470,13 +2481,42 @@ function InfiniteCanvasPage() {
                         ),
                     );
                 }
-                message.success(`生成完成${typeof final.costSpark === "number" ? `（${final.costSpark} Spark）` : ""}`);
+                // 数量 N > 1 时，其余产物建成右侧节点，避免"付了 N 份钱只拿到 1 份"
+                if (extraOutputs.length) {
+                    const created: CanvasNodeData[] = [];
+                    for (const [index, item] of extraOutputs.entries()) {
+                        let metadata;
+                        if (item.mime?.startsWith("video/")) {
+                            const meta = await probeVideoMeta(item.url);
+                            metadata = videoMetadata({ url: item.url, storageKey: item.storageKey, bytes: item.bytes, mimeType: item.mime, ...meta });
+                        } else if (item.mime?.startsWith("audio/")) {
+                            const meta = await probeAudioMeta(item.url);
+                            metadata = audioMetadata({ url: item.url, storageKey: item.storageKey, bytes: item.bytes, mimeType: item.mime, durationMs: meta.durationMs });
+                        } else {
+                            const meta = await readImageMeta(item.url);
+                            metadata = imageMetadata({ url: item.url, storageKey: item.storageKey, width: meta.width, height: meta.height, bytes: item.bytes, mimeType: item.mime });
+                        }
+                        const type = item.mime?.startsWith("video/") ? CanvasNodeType.Video : item.mime?.startsWith("audio/") ? CanvasNodeType.Audio : CanvasNodeType.Image;
+                        created.push(
+                            createCanvasNode(type, { x: sourceNode.position.x + sourceNode.width + 360 + index * 40, y: sourceNode.position.y + sourceNode.height / 2 + index * 360 }, {
+                                ...metadata,
+                                prompt: context.prompt,
+                                provider,
+                                endpoint,
+                            }),
+                        );
+                    }
+                    if (created.length) setNodes((prev) => [...prev, ...created]);
+                }
+
+                message.success(`生成完成${outputs.length > 1 ? `（${outputs.length} 个产物）` : ""}${typeof final.costSpark === "number" ? `（${final.costSpark} Spark）` : ""}`);
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
                 const detail = error instanceof Error ? error.message : "生成失败";
                 message.error(detail);
                 setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: detail } } : node)));
             } finally {
+                solgridRunIdsRef.current.delete(nodeId);
                 finishGenerationRequest(nodeId, controller);
                 setRunningNodeId((current) => (current === nodeId ? null : current));
             }
