@@ -75,6 +75,25 @@ CANVAS_TOKEN=<daemon.json 里的 token>
 
 所有 `/api/*` 都需要 `x-canvas-token`。写入时 **`data:` / `blob:` 地址会被剥离**（画布文档只允许 `assetId` / `storageKey`），资产层在 M1 接管。`blob:` 只在创建它的标签页存活，写进文档就是死链。
 
+## Agent 接入（MCP）
+
+```bash
+node bin/solgrid-canvas.mjs install --agent codex|claude|dsh
+```
+
+注册的是 stdio MCP：`node daemon/mcp.mjs`。它不重复实现业务，全部转发给 daemon；daemon 没起时会自动拉起。工具包括 `canvas_get_state` / `canvas_apply_ops` / `canvas_place_artifacts` / `canvas_import_local` / `canvas_run_nodes` / `canvas_watch_run` / `canvas_cancel_run` 等。
+
+## 生成审批
+
+```
+POST /api/approvals              {projectId,nodeId,provider,endpoint,params} → {id,status}
+GET  /api/approvals?projectId=   待审批列表
+GET  /api/approvals/:id          状态（pending/approved/denied/expired）
+POST /api/approvals/:id/decision {allow:true|false}
+```
+
+审批默认只存在内存、5 分钟过期。`CANVAS_AUTO_APPROVE=1` 仅用于测试。
+
 ## 自测
 
 ```bash

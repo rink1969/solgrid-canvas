@@ -47,6 +47,16 @@ npm run dev
 
 项目数据落在 `~/.solgrid-canvas/projects/<id>/`：`project.json`（元信息）+ `canvas.json`（JSON Canvas 1.0，Agent/Obsidian 可直接读写）+ `assets/`（M1 接入）。
 
+## 给 Agent 接入
+
+```bash
+npm run daemon                              # 先起 daemon
+node bin/solgrid-canvas.mjs install --agent codex   # 或 claude / dsh
+node bin/solgrid-canvas.mjs doctor          # 检查环境
+```
+
+装好后在 Agent 里直接说：“在画布上建 3 个文本节点连成链”“读一下我选中的节点”“把这几张图放到视频节点右边”“生成这个图片节点”。Agent 发起生成时画布会弹确认框，你点允许才会计费。
+
 ## 文档
 
 | 文档 | 内容 |

@@ -5,8 +5,16 @@
     "description": "solgrid 平台特化的本地无限画布：daemon + web",
     "scripts": {
         "daemon": "node daemon/server.mjs",
-        "smoke": "node daemon/smoke.mjs",
+        "smoke": "npm run smoke:store && npm run smoke:runs && npm run smoke:mcp",
         "dev": "npm --prefix web run dev",
-        "build": "npm --prefix web run build"
+        "build": "npm --prefix web run build",
+        "mcp": "node daemon/mcp.mjs",
+        "doctor": "node bin/solgrid-canvas.mjs doctor",
+        "smoke:store": "node daemon/smoke.mjs",
+        "smoke:runs": "node daemon/smoke-runs.mjs",
+        "smoke:mcp": "node daemon/smoke-mcp.mjs"
+    },
+    "bin": {
+        "solgrid-canvas": "bin/solgrid-canvas.mjs"
     }
 }

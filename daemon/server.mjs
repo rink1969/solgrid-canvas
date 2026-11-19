@@ -10,6 +10,7 @@ import { createStore } from "./store.mjs";
 import { receiveAsset, serveAsset } from "./assets.mjs";
 import { createCatalogCache, createOpLog, createRunStore, openDb } from "./db.mjs";
 import { applyOps, normalizeOps } from "./ops.mjs";
+import { createApprovalStore } from "./approvals.mjs";
 import { createGateway } from "./gateway.mjs";
 import { createRunEngine } from "./runs.mjs";
 
@@ -119,6 +120,7 @@ const engine = createRunEngine({
     opLog,
 });
 void engine.recover();
+const approvals = createApprovalStore({ engine, broadcast, log });
 
 // ---- 路由 ----
 async function handle(req, res) {
@@ -234,6 +236,46 @@ async function handle(req, res) {
             if (stale) return sendJson(res, 200, { detail: stale, cached: true, warning: error.message });
             return sendJson(res, 502, { error: "solgrid_unavailable", message: error.message });
         }
+    }
+
+    // ---- 生成审批（Agent 花钱前必须由用户确认）----
+    if (pathname === "/api/approvals" && req.method === "POST") {
+        let body;
+        try {
+            body = JSON.parse(await readBody(req));
+        } catch (error) {
+            return sendJson(res, 400, { error: "invalid_json", message: error.message });
+        }
+        const { projectId, nodeId, provider, endpoint } = body || {};
+        if (!projectId || !provider || !endpoint) return sendJson(res, 400, { error: "missing_fields" });
+        const approval = approvals.create({ projectId, nodeId: nodeId || null, provider, endpoint, params: body.params || {} });
+        return sendJson(res, 200, { id: approval.id, status: approval.status, run: approval.run || null });
+    }
+
+    if (pathname === "/api/approvals" && req.method === "GET") {
+        const projectId = url.searchParams.get("projectId") || "";
+        const status = url.searchParams.get("status") || "pending";
+        return sendJson(res, 200, { approvals: approvals.list(projectId, status) });
+    }
+
+    const approvalMatch = pathname.match(/^\/api\/approvals\/([0-9a-f-]{36})$/);
+    if (approvalMatch && req.method === "GET") {
+        const item = approvals.get(approvalMatch[1]);
+        if (!item) return sendJson(res, 404, { error: "not_found" });
+        return sendJson(res, 200, { id: item.id, status: item.status, run: item.run || null });
+    }
+
+    const decisionMatch = pathname.match(/^\/api\/approvals\/([0-9a-f-]{36})\/decision$/);
+    if (decisionMatch && req.method === "POST") {
+        let body;
+        try {
+            body = JSON.parse(await readBody(req));
+        } catch (error) {
+            return sendJson(res, 400, { error: "invalid_json", message: error.message });
+        }
+        const decided = approvals.decide(decisionMatch[1], Boolean(body?.allow));
+        if (!decided) return sendJson(res, 404, { error: "not_found_or_decided" });
+        return sendJson(res, 200, { id: decided.id, status: decided.status, run: decided.run || null });
     }
 
     // ---- run 队列 ----

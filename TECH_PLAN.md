@@ -692,7 +692,7 @@ CREATE TABLE compositions(id TEXT PK, project_id TEXT, json TEXT, updated_at INT
 |---|---|---|
 | **M0** | 基本完成 | daemon（零依赖）+ 项目目录存储（JSON Canvas 1.0）+ 鉴权/Origin 白名单 + 剥离 data/blob + web 双向同步 + `smoke.mjs` 20 项。<br>剩余：视口虚拟化（并入 M1）。 |
 | **M1** | 完成 | 已完成：**画布生成闭环**（节点选 provider/endpoint → daemon 按 family 转请求体 → 参考素材 `files upload` → 排队 → 产物落 assets → 节点回填）＋确认弹窗；**资产层**（上传→`assets/<sha256>`、Range 读取、内容去重，web 侧图片/视频/音频全部改走 daemon）＋**run 引擎**（`solgrid run` 提交、`runs get` 轮询、幂等键落盘、启动恢复、产物自动落地、记账）＋**工具目录缓存**（discover/inspect 24h）＋ `smoke-runs.mjs` 11 项（假 CLI，不花钱）。＋**raw JSON 与 schema 兜底**（节点面板显示请求体字段/参考价，可整段覆写 body，陌生 family 也可跑）＋**Solgrid 内置渠道**（渠道页只读展示，catalog 驱动）＋**偏好设置里的默认模型**（生图/生视频/声音）＋ `/image` `/video` 工作台下线。＋**运行历史面板**（列表/汇总/详情/取消/重试/删除，落盘实际请求体）＋**增量 op 同步**（`POST /projects/:id/ops` + op 日志 + rev 冲突回退，替代整份 PUT）。<br>可靠性收尾：run 完成回填节点（daemon 为唯一写入方，含多产物建节点）、刷新时有活跃 run 保持 loading 并轮询对齐、停止即取消远端。已删除本地代理（`canvas-proxy` / 设置页 / `withLocalProxy`）、`/image` `/video` 工作台文件、渠道编辑器组件。遗留（非阻塞）：`use-config-store` 的 channels/models 数据结构仍在（agent 站点工具引用）；文本生成不接入（LLM 复用本地 Agent）。 |
-| M2 | 未开始 | ACP client + MCP server |
+| **M2** | 完成（M2d 暂缓） | MCP server（11 个工具）+ 布点引擎 + 生成审批（画布确认）+ CLI（daemon/mcp/doctor/install）+ 技能包。ACP 内嵌对话按要求暂缓。 |
 | M3 / M3b / M4 / M5 | 未开始 | 技能 / 编辑层 / 时间线 / 发布 |
 
 > 代码进展以 `git log` 为准；本表只记录相对方案的偏差与剩余项。

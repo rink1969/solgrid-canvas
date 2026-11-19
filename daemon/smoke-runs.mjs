@@ -253,6 +253,29 @@ try {
     check("数量 N 多产物都落画布", imageNodes.length === 3, `image nodes=${imageNodes.length}`);
     check("多产物都带 assetId", imageNodes.every((node) => String(node.metadata?.storageKey || "").startsWith("asset:smokeproj/")));
 
+    // 审批：Agent 请求 → 用户允许 → 才会入队
+    const approval = await fetch(`${BASE}/api/approvals`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ projectId: "smokeproj", nodeId: "node1", provider: "alibaba", endpoint: "/v1/image/qwen-image-3.0", params: { prompt: "审批测试" } }),
+    }).then((r) => r.json());
+    check("审批创建为 pending", approval.status === "pending" && Boolean(approval.id));
+    const pending = await fetch(`${BASE}/api/approvals?projectId=smokeproj&status=pending`, { headers }).then((r) => r.json());
+    check("待审批列表包含该请求", pending.approvals.some((item) => item.id === approval.id));
+    const decided = await fetch(`${BASE}/api/approvals/${approval.id}/decision`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ allow: true }),
+    }).then((r) => r.json());
+    check("允许后生成 run", decided.status === "approved" && Boolean(decided.run?.id));
+    for (let i = 0; i < 40; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        const payload = await fetch(`${BASE}/api/runs/${decided.run.id}`, { headers }).then((r) => r.json());
+        if (["completed", "failed", "uncertain", "stopped"].includes(payload.run?.status)) break;
+    }
+    const afterDecision = await fetch(`${BASE}/api/approvals?projectId=smokeproj&status=pending`, { headers }).then((r) => r.json());
+    check("审批处理后不在待办里", !afterDecision.approvals.some((item) => item.id === approval.id));
+
     // 列表与取消
     const list = await fetch(`${BASE}/api/runs?projectId=smokeproj`, { headers }).then((r) => r.json());
     check("run 列表", (list.runs?.length || 0) >= 2 && list.runs.some((item) => item.id === run.id));

@@ -30,6 +30,10 @@
 + [修复] 节点「停止」会同时取消 daemon 队列里的 run，避免点了停止平台仍继续计费。
 + [修复] 画布「数量 N」>1 时所有产物都会落到画布（首张回填当前节点，其余在右侧建节点），不再只取第一张。
 + [调整] 移除本地代理：删除 `canvas-proxy` 与设置页「本地代理」页签，渠道与 WebDAV 请求改为直连；删除已下线的 `/image`、`/video` 工作台文件与渠道编辑器组件。
++ [新增] MCP server（stdio，零依赖）：把画布暴露给本地 Agent——读项目/节点、批量改画布、本机文件导入、自动布点、发起生成、等待结果、取消。
++ [新增] 产物布点引擎：图片一列、文本一列，从锚点右侧自动排布并避让已有节点，Agent 不需要自己算坐标。
++ [新增] 生成审批：Agent 发起生成时画布弹出确认框，用户点「允许本次生成」才会入队；拒绝或超时不产生费用。
++ [新增] `solgrid-canvas` CLI：`daemon` / `mcp` / `doctor` / `install --agent codex|claude|dsh`，安装时注册 MCP 并安装技能包。
 + [新增] 音频生成接入 solgrid：节点可选平台音频模型（minimax t2a_v2 / elevenlabs text-to-speech / stability 与 elevenlabs 的音效与音乐），音频设置里的音色/格式/语速会映射到对应契约，产物（hex/base64/URL 三种形状）落 `assets/`。
 + [调整] 文本节点提示"暂未接入 solgrid"；移除 `/image`、`/video` 两个独立工作台页面与顶部导航入口。
 
