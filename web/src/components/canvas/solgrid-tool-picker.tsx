@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Select } from "antd";
 
 import { listTools, type SolgridTool } from "@/services/api/solgrid";
+import { useConfigStore } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
@@ -46,14 +47,17 @@ export function SolgridToolPicker({ node, mode, onChange }: { node: CanvasNodeDa
         };
     }, [mode]);
 
-    const value = node.metadata?.provider && node.metadata?.endpoint ? `${node.metadata.provider}|${node.metadata.endpoint}` : undefined;
+    const config = useConfigStore((state) => state.config);
+    const fallback = mode === "video" ? config.defaultVideoTool : config.defaultImageTool;
+    const own = node.metadata?.provider && node.metadata?.endpoint ? `${node.metadata.provider}|${node.metadata.endpoint}` : undefined;
+    const value = own ?? (fallback ? `${fallback.provider}|${fallback.endpoint}` : undefined);
 
     return (
         <Select
             size="small"
             loading={loading}
             value={value}
-            placeholder="选择 solgrid 模型"
+            placeholder={fallback ? "使用默认模型（可在设置里改）" : "选择 solgrid 模型"}
             className="!max-w-[210px]"
             popupMatchSelectWidth={460}
             variant="borderless"

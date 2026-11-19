@@ -15,6 +15,9 @@ export type ChannelModel = {
     script?: string;
 };
 
+// solgrid 调用坐标（内置渠道不存 key/baseUrl，只有 provider + endpoint）
+export type ToolRef = { provider: string; endpoint: string; title?: string };
+
 export type ModelChannel = {
     id: string;
     name: string;
@@ -30,6 +33,8 @@ export type AiConfig = {
     apiKey: string;
     apiFormat: ApiCallFormat;
     channels: ModelChannel[];
+    defaultImageTool?: ToolRef;
+    defaultVideoTool?: ToolRef;
     model: string;
     imageModel: string;
     videoModel: string;
@@ -142,6 +147,7 @@ type ConfigStore = {
     configTab: ConfigTabKey;
     shouldPromptContinue: boolean;
     updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
+    setDefaultTool: (capability: "image" | "video", tool: ToolRef | null) => void;
     importChannelCredentials: (input: { baseUrl?: string | null; apiKey?: string | null }) => ChannelCredentialsImportResult;
     updateWebdavConfig: <K extends keyof WebdavSyncConfig>(key: K, value: WebdavSyncConfig[K]) => void;
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
@@ -220,6 +226,13 @@ export const useConfigStore = create<ConfigStore>()(
             isConfigOpen: false,
             configTab: "channels",
             shouldPromptContinue: false,
+            setDefaultTool: (capability, tool) =>
+                set((state) => ({
+                    config: {
+                        ...state.config,
+                        ...(capability === "image" ? { defaultImageTool: tool || undefined } : { defaultVideoTool: tool || undefined }),
+                    },
+                })),
             updateConfig: (key, value) =>
                 set((state) => ({
                     config: {

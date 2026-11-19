@@ -691,7 +691,7 @@ CREATE TABLE compositions(id TEXT PK, project_id TEXT, json TEXT, updated_at INT
 | 期 | 状态 | 说明 |
 |---|---|---|
 | **M0** | 基本完成 | daemon（零依赖）+ 项目目录存储（JSON Canvas 1.0）+ 鉴权/Origin 白名单 + 剥离 data/blob + web 双向同步 + `smoke.mjs` 20 项。<br>剩余：视口虚拟化（并入 M1）。 |
-| **M1** | 完成 | 已完成：**画布生成闭环**（节点选 provider/endpoint → daemon 按 family 转请求体 → 参考素材 `files upload` → 排队 → 产物落 assets → 节点回填）＋确认弹窗；**资产层**（上传→`assets/<sha256>`、Range 读取、内容去重，web 侧图片/视频/音频全部改走 daemon）＋**run 引擎**（`solgrid run` 提交、`runs get` 轮询、幂等键落盘、启动恢复、产物自动落地、记账）＋**工具目录缓存**（discover/inspect 24h）＋ `smoke-runs.mjs` 11 项（假 CLI，不花钱）。＋**raw JSON 与 schema 兜底**（节点面板显示请求体字段/参考价，可整段覆写 body，陌生 family 也可跑）＋渠道 UI 与 `/image` `/video` 工作台下线。<br>遗留（非阻塞）：`use-config-store` 的 channels/models 代码与模型脚本编辑器尚未物理删除；文本/音频生成未接入（节点已提示）。 |
+| **M1** | 完成 | 已完成：**画布生成闭环**（节点选 provider/endpoint → daemon 按 family 转请求体 → 参考素材 `files upload` → 排队 → 产物落 assets → 节点回填）＋确认弹窗；**资产层**（上传→`assets/<sha256>`、Range 读取、内容去重，web 侧图片/视频/音频全部改走 daemon）＋**run 引擎**（`solgrid run` 提交、`runs get` 轮询、幂等键落盘、启动恢复、产物自动落地、记账）＋**工具目录缓存**（discover/inspect 24h）＋ `smoke-runs.mjs` 11 项（假 CLI，不花钱）。＋**raw JSON 与 schema 兜底**（节点面板显示请求体字段/参考价，可整段覆写 body，陌生 family 也可跑）＋**Solgrid 内置渠道**（只读、catalog 驱动、可设默认生图/生视频模型）＋ `/image` `/video` 工作台下线。<br>遗留（非阻塞）：`use-config-store` 的 channels/models 代码与模型脚本编辑器尚未物理删除；文本/音频生成未接入（节点已提示）。 |
 | M2 | 未开始 | ACP client + MCP server |
 | M3 / M3b / M4 / M5 | 未开始 | 技能 / 编辑层 / 时间线 / 发布 |
 

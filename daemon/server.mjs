@@ -179,6 +179,43 @@ async function handle(req, res) {
         }
     }
 
+    // 平台模型目录：discover 多个关键词按能力归类，缓存 24h（?refresh=1 强制刷新）
+    if (pathname === "/api/tools/catalog" && req.method === "GET") {
+        const key = "catalog:v1";
+        const force = url.searchParams.get("refresh") === "1";
+        if (!force) {
+            const cached = catalog.get(key, 24 * 60 * 60 * 1000);
+            if (cached) return sendJson(res, 200, { catalog: cached, cached: true });
+        }
+        try {
+            const queries = ["image", "video", "audio"];
+            const buckets = { image: [], video: [], audio: [] };
+            const seen = new Set();
+            for (const query of queries) {
+                const results = await gateway.discover(query, 100);
+                for (const item of results) {
+                    if (!item?.provider || !item?.endpoint) continue;
+                    const id = `${item.provider}|${item.endpoint}`;
+                    if (seen.has(id)) continue;
+                    seen.add(id);
+                    const endpoint = String(item.endpoint);
+                    const bucket = /image-to-video|\/video\//.test(endpoint) ? "video" : /\/image\//.test(endpoint) ? "image" : /audio|t2a|tts|music|speech/i.test(endpoint) ? "audio" : null;
+                    if (!bucket) continue;
+                    buckets[bucket].push({ provider: item.provider, endpoint, description: item.description, price: item.price });
+                }
+            }
+            buckets.image.sort((a, b) => (a.provider + a.endpoint).localeCompare(b.provider + b.endpoint));
+            buckets.video.sort((a, b) => (a.provider + a.endpoint).localeCompare(b.provider + b.endpoint));
+            buckets.audio.sort((a, b) => (a.provider + a.endpoint).localeCompare(b.provider + b.endpoint));
+            catalog.put(key, buckets);
+            return sendJson(res, 200, { catalog: buckets, cached: false });
+        } catch (error) {
+            const stale = catalog.get(key);
+            if (stale) return sendJson(res, 200, { catalog: stale, cached: true, warning: error.message });
+            return sendJson(res, 502, { error: "solgrid_unavailable", message: error.message });
+        }
+    }
+
     if (pathname === "/api/tools/detail" && req.method === "GET") {
         const provider = String(url.searchParams.get("provider") || "").trim();
         const endpoint = String(url.searchParams.get("endpoint") || "").trim();

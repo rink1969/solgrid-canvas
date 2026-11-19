@@ -35,6 +35,13 @@ export type SolgridToolDetail = {
     notes?: string;
 };
 
+export type SolgridCatalog = { image: SolgridTool[]; video: SolgridTool[]; audio: SolgridTool[] };
+
+export async function listCatalog(refresh = false): Promise<SolgridCatalog> {
+    const data = await request<{ catalog: SolgridCatalog }>(`/tools/catalog${refresh ? "?refresh=1" : ""}`);
+    return data.catalog || { image: [], video: [], audio: [] };
+}
+
 export async function inspectTool(provider: string, endpoint: string): Promise<SolgridToolDetail> {
     const data = await request<{ detail: SolgridToolDetail }>(`/tools/detail?provider=${encodeURIComponent(provider)}&endpoint=${encodeURIComponent(endpoint)}`);
     return data.detail || {};

@@ -2349,11 +2349,10 @@ function InfiniteCanvasPage() {
 
     // solgrid 生成：节点选了 {provider, endpoint} 时走这里，由 daemon 排队调用平台
     const runSolgridGeneration = useCallback(
-        async (sourceNode: CanvasNodeData, mode: "image" | "video", prompt: string) => {
+        async (sourceNode: CanvasNodeData, mode: "image" | "video", prompt: string, tool: { provider: string; endpoint: string }) => {
             const nodeId = sourceNode.id;
-            const provider = sourceNode.metadata?.provider;
-            const endpoint = sourceNode.metadata?.endpoint;
-            if (!provider || !endpoint) return;
+            const provider = tool.provider;
+            const endpoint = tool.endpoint;
 
             setRunningNodeId(nodeId);
             const controller = startGenerationRequest(nodeId, nodeId, nodeId);
@@ -2453,13 +2452,17 @@ function InfiniteCanvasPage() {
     const handleGenerateNode = useCallback(
         async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => {
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
-            // 选了 solgrid 平台模型的节点：跳过渠道/脚本那套，直接排队
-            if (sourceNode?.metadata?.provider && sourceNode.metadata?.endpoint && (mode === "image" || mode === "video")) {
-                await runSolgridGeneration(sourceNode, mode, prompt);
-                return;
-            }
-            if (isMediaGenerationMode(mode) && !(sourceNode?.metadata?.provider && sourceNode.metadata?.endpoint)) {
-                message.warning("请先在节点上选择 solgrid 模型");
+            // 图片/视频一律走 solgrid：节点自己选了模型就用节点的，否则用设置里的默认模型
+            if (isMediaGenerationMode(mode) && sourceNode) {
+                const own = sourceNode.metadata?.provider && sourceNode.metadata?.endpoint ? { provider: sourceNode.metadata.provider, endpoint: sourceNode.metadata.endpoint } : null;
+                const config = useConfigStore.getState().config;
+                const fallback = mode === "video" ? config.defaultVideoTool : config.defaultImageTool;
+                const tool = own ?? (fallback ? { provider: fallback.provider, endpoint: fallback.endpoint } : null);
+                if (!tool) {
+                    message.warning("还没有默认模型：请到设置 → 渠道 里选一个，或在节点上单独选择");
+                    return;
+                }
+                await runSolgridGeneration(sourceNode, mode, prompt, tool);
                 return;
             }
             const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);

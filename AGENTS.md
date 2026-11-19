@@ -26,7 +26,7 @@
 3. **只有 daemon 发起付费调用**：web 端不直连任何生成 API，不持有 solgrid API key，不持有任何模型凭证。
 4. **生成只走 `solgrid` CLI**：`solgrid run -p … -e … -f body.json --idempotency-key K -j`（**不带 `--wait`**）+ `solgrid runs get -r R -j` 轮询。幂等键由 daemon 生成、入队即落盘；重试复用同一个键。
 5. **默认单点串行**：平台账号级只允许 1 个在途 run。并发度是配置项，不是默认行为；提交前不做多路并发。
-6. **模型 = `{provider, endpoint, params}`**：禁止把 solgrid 伪装成"OpenAI 兼容渠道"，禁止在代码里硬编码模型清单；参数表单由 `inspect` 的 JSON Schema 驱动，未知端点走 raw JSON 兜底。
+6. **模型 = `{provider, endpoint, params}`**：禁止把 solgrid 伪装成"OpenAI 兼容渠道"（不要造 baseUrl/apiKey、不要按模型写脚本），禁止硬编码模型清单。**允许在设置页以「内置渠道」形式呈现 solgrid**：只读卡片 + 模型列表来自 daemon 的 catalog 缓存，用于选择默认模型；参数表单由 `inspect` 的 JSON Schema 驱动，未知端点走 raw JSON 兜底。
 7. **Agent 集成：ACP 进、MCP 出**：画布作为 ACP client 驱动本地 Agent，同时作为 MCP server 供 Agent 操作画布。**不读** `~/.codex`、`~/.claude`、`~/.dsh` 里的配置或凭证来"猜"模型。
 8. **图与时间线分离**：时间线是独立文档（`timeline.json`），不是节点图的子集。
 9. **付费必须可见可确认**：Agent 通道的花费确认挂在 ACP `request_permission`；UI 通道必须有明确确认动作。禁止静默花钱。
