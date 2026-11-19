@@ -57,23 +57,39 @@ function alibabaImage({ params, mediaUrls }) {
     };
 }
 
-function wanVideo({ params, mediaUrls }) {
-    const mode = params.videoMode === "reference" || mediaUrls.length > 2 ? "reference" : "frames";
-    const media = [];
-    if (mode === "frames") {
-        if (mediaUrls[0]) media.push({ type: "first_frame", url: mediaUrls[0] });
-        if (mediaUrls[1]) media.push({ type: "last_frame", url: mediaUrls[1] });
-    } else {
-        for (const url of mediaUrls.slice(0, 5)) media.push({ type: "reference_image", url });
+function invalid(message) {
+    return Object.assign(new Error(message), { code: "invalid_params" });
+}
+
+// wan 三个端点契约不同：i2v 只收首尾帧、t2v 不收素材、r2v 收参考图
+function wanVideo({ params, mediaUrls, endpoint }) {
+    const prompt = String(params.prompt || "").trim();
+    const duration = Math.max(2, Math.min(15, Math.round(Number(params.seconds) || 5)));
+    const resolution = wanResolution(params.resolution);
+
+    if (endpoint.endsWith("t2v")) {
+        if (mediaUrls.length) throw invalid("wan2.7-t2v 是纯文生视频，不接受参考素材。带参考图请改用 wan2.7-i2v（首尾帧）或 wan2.7-r2v（参考图）。");
+        return { input: { prompt }, parameters: { resolution, duration } };
     }
-    const body = {
-        input: { prompt: String(params.prompt || "").trim(), ...(media.length ? { media } : {}) },
-        parameters: {
-            resolution: wanResolution(params.resolution),
-            duration: Math.max(2, Math.min(15, Math.round(Number(params.seconds) || 5))),
-        },
-    };
-    return body;
+
+    if (endpoint.endsWith("r2v")) {
+        if (!mediaUrls.length) throw invalid("wan2.7-r2v 至少需要 1 张参考图。");
+        const media = mediaUrls.slice(0, 5).map((url) => ({ type: "reference_image", url }));
+        const parameters = { resolution, duration };
+        const ratio = ratioFromSize(params.size);
+        if (ratio) parameters.ratio = ratio;
+        return { input: { prompt, media }, parameters };
+    }
+
+    // i2v：只接受首帧/尾帧/续拍片段/驱动音频
+    const mode = params.videoMode === "reference" || mediaUrls.length > 2 ? "reference" : "frames";
+    if (mode === "reference") {
+        throw invalid("wan2.7-i2v 只接受首帧/尾帧，不接受参考图。请把视频模式切到「首尾帧」，或改用 wan2.7-r2v 做参考生视频。");
+    }
+    if (!mediaUrls.length) throw invalid("wan2.7-i2v 需要一张首帧图。");
+    const media = [{ type: "first_frame", url: mediaUrls[0] }];
+    if (mediaUrls[1]) media.push({ type: "last_frame", url: mediaUrls[1] });
+    return { input: { prompt, media }, parameters: { resolution, duration } };
 }
 
 function seedanceVideo({ params, mediaUrls }) {
@@ -108,5 +124,5 @@ export function buildBody({ provider, endpoint, params, mediaUrls }) {
     }
     const prompt = String(params?.prompt || "").trim();
     if (!prompt) throw Object.assign(new Error("prompt 不能为空"), { code: "missing_prompt" });
-    return { family: family.id, body: family.build({ params, mediaUrls }) };
+    return { family: family.id, body: family.build({ params, mediaUrls, endpoint }) };
 }

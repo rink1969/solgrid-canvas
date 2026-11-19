@@ -169,9 +169,12 @@ export function createRunEngine({ store, gateway, projectsDir, bodyDir, broadcas
             } catch (error) {
                 log(`run ${run.id} 提交失败：${error.message}（family=${prepared.family}）`);
                 log(`run ${run.id} body=${JSON.stringify(prepared.body).slice(0, 800)}`);
-                // 分类：能被明确判定"没创建"就是 failed；只有幂等键找回失败且无法判定时才 uncertain
-                let outcome = "unknown";
-                if (error.idempotencyKey) {
+                // 分类：网络/超时类才可能"已创建但结果未知"；参数/校验类一律判定没创建
+                const maybeCreated = /超时|timeout|网络|network|ECONN|ENOTFOUND|fetch failed|socket/i.test(error.message);
+                let outcome = maybeCreated ? "unknown" : "absent";
+                if (error.remoteRunId) {
+                    submitted = { remoteRunId: error.remoteRunId };
+                } else if (error.idempotencyKey && outcome === "unknown") {
                     try {
                         const found = await gateway.getRunByKey(error.idempotencyKey);
                         if (found.remoteRunId) submitted = { remoteRunId: found.remoteRunId };
@@ -179,9 +182,6 @@ export function createRunEngine({ store, gateway, projectsDir, bodyDir, broadcas
                     } catch (lookupError) {
                         if (lookupError.code === "tool_run_not_found") outcome = "absent";
                     }
-                } else {
-                    // 本地校验/参数错误：没有幂等键，说明 run 根本没被创建
-                    outcome = "absent";
                 }
                 if (!submitted) {
                     return outcome === "absent" ? fail(run, `提交被拒绝：${error.message}`, "failed") : fail(run, `提交结果未知：${error.message}`, "uncertain");

@@ -132,6 +132,34 @@ try {
     check("seedance 比例由 size 推断", seedanceBody?.ratio === "4:3", JSON.stringify(seedanceBody?.ratio));
     check("seedance 拒绝时标记 failed 而非 uncertain", seedanceRun.run.status !== "uncertain");
 
+    // wan 端点校验：i2v + 参考模式应直接失败并给出改用 r2v 的指引（不提交 CLI）
+    const badMode = await fetch(`${BASE}/api/runs`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ projectId: "smokeproj", provider: "alibaba", endpoint: "/v1/video/wan2.7-i2v", params: { prompt: "舞台", references: ["asset:smokeproj/1111111111111111111111111111111111111111111111111111111111111111.png"], videoMode: "reference" } }),
+    }).then((r) => r.json());
+    let badFinished = null;
+    for (let i = 0; i < 40; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        const payload = await fetch(`${BASE}/api/runs/${badMode.run.id}`, { headers }).then((r) => r.json());
+        badFinished = payload.run;
+        if (["failed", "uncertain", "completed", "stopped"].includes(badFinished?.status)) break;
+    }
+    check("i2v + 参考模式给出明确错误", badFinished?.status === "failed" && /r2v/.test(badFinished?.error || ""), JSON.stringify(badFinished).slice(0, 200));
+
+    const r2vRun = await fetch(`${BASE}/api/runs`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ projectId: "smokeproj", provider: "alibaba", endpoint: "/v1/video/wan2.7-r2v", params: { prompt: "r2v测试", references: ["asset:smokeproj/2222222222222222222222222222222222222222222222222222222222222222.png"], size: "640x480" } }),
+    }).then((r) => r.json());
+    for (let i = 0; i < 40; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        const payload = await fetch(`${BASE}/api/runs/${r2vRun.run.id}`, { headers }).then((r) => r.json());
+        if (["completed", "failed", "uncertain", "stopped"].includes(payload.run?.status)) break;
+    }
+    const r2vBody = readBodies().find((item) => item?.input?.prompt === "r2v测试");
+    check("r2v 使用 reference_image", r2vBody?.input?.media?.[0]?.type === "reference_image", JSON.stringify(r2vBody).slice(0, 200));
+
     // 列表与取消
     const list = await fetch(`${BASE}/api/runs?projectId=smokeproj`, { headers }).then((r) => r.json());
     check("run 列表", (list.runs?.length || 0) >= 2 && list.runs.some((item) => item.id === run.id));
