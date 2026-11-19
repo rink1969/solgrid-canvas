@@ -70,6 +70,7 @@ try {
 
     const options = started.json?.configOptions || [];
     const model = options.find((option) => option.id === "model");
+    check("默认模型来自 ACP profile 同步", String(model?.currentValue || "").includes("deepseek-account"), String(model?.currentValue));
     const account = model?.options?.flatMap((group) => group.options || []).find((option) => option.value.includes("deepseek-account"));
     if (account) {
         const changed = await api("/api/agent/model", { method: "POST", body: JSON.stringify({ projectId: "acpproj", configId: "model", value: account.value }) });

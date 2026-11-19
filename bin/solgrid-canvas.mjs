@@ -120,10 +120,163 @@ function installAgent(agent) {
     return 0;
 }
 
+
+// ---- profile 配置同步（A 方案）：desktop 的 provider/默认模型 → ACP profile ----
+const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
+
+function patchFile(profile) {
+    return path.join(DSH_HOME, "profiles", profile, "cordis.patch.yml");
+}
+
+// 顶层 patch 条目按 "- id:" 切块；只处理顶格列表项，缩进行归入当前块
+function splitPatch(text) {
+    const lines = text.split(/\r?\n/);
+    const header = [];
+    const blocks = [];
+    let current = null;
+    for (const line of lines) {
+        if (/^- /.test(line)) {
+            current = [line];
+            blocks.push(current);
+            continue;
+        }
+        if (current) current.push(line);
+        else header.push(line);
+    }
+    return { header, blocks };
+}
+
+function blockId(block) {
+    const match = block[0].match(/^-\s+id:\s*["']?([A-Za-z0-9_-]+)["']?\s*$/);
+    return match ? match[1] : null;
+}
+
+function stripTrailingBlank(block) {
+    const copy = [...block];
+    while (copy.length > 1 && copy[copy.length - 1].trim() === "") copy.pop();
+    return copy;
+}
+
+const SYNC_IDS = ["agent-default-model", "llm-pi-ai"];
+
+function collectSyncBlocks(sourceText, log) {
+    const { blocks } = splitPatch(sourceText);
+    const picked = [];
+    for (const block of blocks) {
+        const id = blockId(block);
+        if (!id || !SYNC_IDS.includes(id)) continue;
+        if (id === "llm-pi-ai") {
+            const body = block.join("\n");
+            const providers = body.match(/providers:\s*\{([^}]*)\}/);
+            if (providers && providers[1].trim() === "") {
+                log(`· ${id}：暂无自定义 provider，跳过`);
+                continue;
+            }
+        }
+        picked.push(stripTrailingBlank(block));
+    }
+    return picked;
+}
+
+function syncConfig({ from = "desktop", target = "acp", dryRun = false } = {}) {
+    const sourcePath = patchFile(from);
+    const targetPath = patchFile(target);
+    if (!fs.existsSync(sourcePath)) return { ok: false, message: `找不到源 profile：${sourcePath}` };
+    if (!fs.existsSync(targetPath)) return { ok: false, message: `找不到目标 profile：${targetPath}，先启动一次 \`dsh --profile ${target}\`` };
+
+    const sourceText = fs.readFileSync(sourcePath, "utf8");
+    const picked = collectSyncBlocks(sourceText, log);
+    if (!picked.length) return { ok: true, message: "没有需要同步的配置（provider 为空且无默认模型差异）", changed: false };
+
+    // 目标是 ACP profile 时，把桌面默认模型同时映射成 ACP 服务的默认（acp 行）
+    const targetPackage = path.join(DSH_HOME, "profiles", target, "package.json");
+    const isAcpProfile = fs.existsSync(targetPackage) && fs.readFileSync(targetPackage, "utf8").includes("dsh-acp-app");
+    if (isAcpProfile) {
+        const defaultBlock = picked.find((block) => blockId(block) === "agent-default-model");
+        if (defaultBlock) {
+            const text = defaultBlock.join("\n");
+            const provider = text.match(/^\s+provider:\s*["']?([A-Za-z0-9_-]+)/m)?.[1];
+            const model = text.match(/^\s+model:\s*["']?([A-Za-z0-9_.-]+)/m)?.[1];
+            if (provider && model) {
+                picked.push(["- id: acp", '  name: "@deepseek-ai/dsh-acp"', "  config:", `    provider: ${provider}`, `    model: ${model}`]);
+            }
+        }
+    }
+
+    const targetText = fs.readFileSync(targetPath, "utf8");
+    const parsed = splitPatch(targetText);
+    const existingById = new Map();
+    for (const block of parsed.blocks) {
+        const id = blockId(block);
+        if (id) existingById.set(id, block);
+    }
+
+    const report = [];
+    const replacements = new Map();
+    const hasChanges = picked.some((block) => !existingById.has(blockId(block)) || existingById.get(blockId(block)).join("\n").trim() !== block.join("\n").trim());
+    for (const block of picked) {
+        const id = blockId(block);
+        if (existingById.has(id)) {
+            const same = existingById.get(id).join("\n").trim() === block.join("\n").trim();
+            if (same) {
+                report.push(`= ${id}（已一致）`);
+                continue;
+            }
+            replacements.set(id, block);
+            report.push(`~ ${id}（覆盖）`);
+        } else {
+            report.push(`+ ${id}（新增）`);
+        }
+    }
+
+    const mergedBlocks = parsed.blocks.map((block) => {
+        const id = blockId(block);
+        return id && replacements.has(id) ? replacements.get(id) : block;
+    });
+    for (const block of picked) {
+        const id = blockId(block);
+        if (id && !existingById.has(id)) mergedBlocks.push(block);
+    }
+
+    const isEmptyRoot = parsed.blocks.length === 0 && parsed.header.join("\n").replace(/#[^\n]*/g, "").trim() === "[]";
+    const nextText = isEmptyRoot
+        ? `${parsed.header.filter((line) => !/^\s*\[\]\s*$/.test(line)).join("\n").trimEnd()}\n${mergedBlocks.map((block) => block.join("\n")).join("\n")}\n`
+        : `${parsed.header.join("\n").trimEnd()}\n${mergedBlocks.map((block) => block.join("\n")).join("\n")}\n`;
+
+    if (!hasChanges) {
+        log([`目标：${targetPath}`, ...report, "没有变化"].join("\n"));
+        return { ok: true, changed: false, message: report.join(", ") };
+    }
+
+    if (dryRun) {
+        log([`目标：${targetPath}`, ...report, "（--dry-run，未写入）"].join("\n"));
+        return { ok: true, changed: true, message: report.join(", ") };
+    }
+
+    const backup = `${targetPath}.bak-${Date.now()}`;
+    fs.copyFileSync(targetPath, backup);
+    fs.writeFileSync(targetPath, nextText);
+    log([`已同步到 ${targetPath}`, ...report, `备份：${path.basename(backup)}`, "重启 daemon（或结束当前 ACP 会话）后生效"].join("\n"));
+    return { ok: true, changed: true, message: report.join(", ") };
+}
+
 async function main() {
     if (command === "daemon") return forward(process.execPath, [DAEMON]);
     if (command === "mcp") return forward(process.execPath, [MCP]);
     if (command === "doctor") return process.exit(await doctor());
+    if (command === "sync-config") {
+        const readFlag = (name, fallback) => {
+            const index = rest.indexOf(name);
+            return index >= 0 ? rest[index + 1] : fallback;
+        };
+        const result = syncConfig({
+            from: readFlag("--from", "desktop"),
+            target: readFlag("--profile", "acp"),
+            dryRun: rest.includes("--dry-run"),
+        });
+        if (!result.ok) log(`✗ ${result.message}`);
+        return process.exit(result.ok ? 0 : 1);
+    }
     if (command === "install") {
         const index = rest.indexOf("--agent");
         const agent = index >= 0 ? rest[index + 1] : "";
@@ -136,6 +289,8 @@ async function main() {
   solgrid-canvas mcp                       以 stdio MCP server 运行（给 Agent 配）
   solgrid-canvas install --agent codex|claude|dsh   注册 MCP 并安装技能包
   solgrid-canvas doctor                    检查 Node / solgrid CLI / daemon / ffmpeg
+  solgrid-canvas sync-config [--from desktop] [--profile acp] [--dry-run]
+                                           把 desktop 的 provider/默认模型同步到 ACP profile
 `);
 }
 
