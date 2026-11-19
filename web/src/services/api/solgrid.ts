@@ -25,6 +25,21 @@ async function request<T>(path: string, init?: { method?: string; body?: string 
     return (await response.json()) as T;
 }
 
+export type SolgridSchema = { type?: string; properties?: Record<string, SolgridSchema>; required?: string[]; enum?: unknown[]; items?: SolgridSchema };
+
+export type SolgridToolDetail = {
+    provider?: string;
+    endpoint?: string;
+    input?: { body?: SolgridSchema; queryParams?: SolgridSchema; pathParams?: SolgridSchema };
+    price?: unknown;
+    notes?: string;
+};
+
+export async function inspectTool(provider: string, endpoint: string): Promise<SolgridToolDetail> {
+    const data = await request<{ detail: SolgridToolDetail }>(`/tools/detail?provider=${encodeURIComponent(provider)}&endpoint=${encodeURIComponent(endpoint)}`);
+    return data.detail || {};
+}
+
 export async function listTools(query: string): Promise<SolgridTool[]> {
     const data = await request<{ results: SolgridTool[] }>(`/tools?q=${encodeURIComponent(query)}`);
     return data.results || [];

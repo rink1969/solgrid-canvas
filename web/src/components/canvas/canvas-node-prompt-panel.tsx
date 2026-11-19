@@ -3,8 +3,8 @@ import { ArrowUp, LoaderCircle, Maximize2, Square } from "lucide-react";
 import { Button, Modal, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 
-import { ModelPicker } from "@/components/model-picker";
 import { SolgridToolPicker } from "./solgrid-tool-picker";
+import { SolgridParamsEditor } from "./solgrid-params-editor";
 import { defaultConfig, resolveModelForCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -91,6 +91,8 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                 placeholder={t(`canvas.promptPanel.${mode === "image" && hasImageContent ? "editImage" : mode === "text" && hasTextContent ? "editText" : mode}`)}
             />
 
+            {mode === "image" || mode === "video" ? <SolgridParamsEditor node={node} onChange={(patch) => onConfigChange(node.id, patch)} /> : null}
+
             <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
                     <Tooltip title={t("canvas.promptPanel.expandEditor")}>
@@ -116,12 +118,12 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                         </>
                     ) : mode === "audio" ? (
                         <>
-                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="audio" onMissingConfig={() => openConfigDialog(true)} className="max-w-[190px]" />
+                            <span className="text-xs opacity-60">音频生成暂未接入 solgrid</span>
                             <CanvasAudioSettingsPopover config={config} buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
                         </>
                     ) : (
                         <>
-                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="text" onMissingConfig={() => openConfigDialog(true)} className="max-w-[190px]" />
+                            <span className="text-xs opacity-60">文本生成暂未接入 solgrid</span>
                             <CanvasTextSettingsPopover config={config} count={node.metadata?.textCount || 1} onConfigChange={(_, value) => onConfigChange(node.id, { reasoningEffort: value })} onCountChange={(textCount) => onConfigChange(node.id, { textCount })} />
                         </>
                     )}

@@ -49,7 +49,7 @@ function createWebdavDomainProgress(): Record<AppSyncDomainKey, WebdavDomainProg
     );
 }
 
-export function AppConfigPanel({ showDoneButton = false, initialTab = "channels" }: { showDoneButton?: boolean; initialTab?: ConfigTabKey }) {
+export function AppConfigPanel({ showDoneButton = false, initialTab = "preferences" }: { showDoneButton?: boolean; initialTab?: ConfigTabKey }) {
     const { message } = App.useApp();
     const { i18n, t } = useTranslation();
     const configInputRef = useRef<HTMLInputElement>(null);
@@ -184,38 +184,6 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
                 onChange={(key) => setActiveTab(key as ConfigTabKey)}
                 items={[
                     {
-                        key: "channels",
-                        label: t("config.tabs.channels"),
-                        children: (
-                            <div>
-                                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                                    <div className="text-xs text-stone-500">{t("config.channels.description")}</div>
-                                    <Button type="primary" icon={<Plus className="size-4" />} onClick={addChannel}>
-                                        {t("config.channels.add")}
-                                    </Button>
-                                </div>
-                                <div className="space-y-2">
-                                    {config.channels.map((channel) => (
-                                        <div key={channel.id} className="flex items-center justify-between gap-3 rounded-lg border border-stone-200 px-4 py-3 dark:border-stone-800">
-                                            <div className="min-w-0">
-                                                <div className="truncate text-sm font-semibold">{channel.name || t("config.channels.unnamed")}</div>
-                                                <div className="mt-1 truncate text-xs text-stone-500">
-                                                    {apiFormatLabel(channel.apiFormat)} · {t("config.channels.modelCount", { count: channel.models.length })} · {channel.baseUrl || t("config.channels.missingUrl")}
-                                                </div>
-                                            </div>
-                                            <div className="flex shrink-0 gap-2">
-                                                <Button size="small" icon={<Pencil className="size-3.5" />} onClick={() => setEditingChannelId(channel.id)}>
-                                                    {t("common.edit")}
-                                                </Button>
-                                                <Button size="small" danger icon={<Trash2 className="size-3.5" />} onClick={() => deleteChannel(channel.id)} />
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        ),
-                    },
-                    {
                         key: "local-proxy",
                         label: t("config.tabs.localProxy"),
                         children: <ConfigLocalProxy />,
@@ -225,14 +193,6 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
                         label: t("config.tabs.preferences"),
                         children: (
                             <Form layout="vertical" requiredMark={false}>
-                                <div className="mb-2 text-sm font-semibold">{t("config.preferences.defaultModels")}</div>
-                                <div className="mb-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                                    {modelGroups.map((group) => (
-                                        <Form.Item key={group.modelKey} label={t(group.labelKey)} className="mb-0">
-                                            <ModelPicker config={config} value={config[group.modelKey]} onChange={(model) => updateConfig(group.modelKey, model)} capability={group.capability} fullWidth />
-                                        </Form.Item>
-                                    ))}
-                                </div>
                                 <div className="mb-2 text-sm font-semibold">{t("config.preferences.generation")}</div>
                                 <div className="grid gap-4 md:grid-cols-4">
                                     <Form.Item label={t("config.preferences.canvasImageCount")} extra={t("config.preferences.canvasImageCountDescription")} className="mb-4">
