@@ -1,9 +1,7 @@
 import { create } from "zustand";
-import { persist, type PersistStorage, type StorageValue } from "zustand/middleware";
 
 import { nanoid } from "nanoid";
 import i18n from "@/i18n";
-import { localForageStorage } from "@/lib/localforage-storage";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
 import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, ViewportTransform } from "@/types/canvas";
 
@@ -40,107 +38,68 @@ type CanvasStore = {
 };
 
 const initialViewport: ViewportTransform = { x: 0, y: 0, k: 1 };
-const CANVAS_STORE_KEY = "infinite-canvas:canvas_store";
-type PersistedCanvasState = Pick<CanvasStore, "projects" | "deletedProjects">;
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
-let queuedPersistState: PersistedCanvasState | null = null;
 
-const canvasStorage: PersistStorage<CanvasStore> = {
-    getItem: async (name) => {
-        const value = await localForageStorage.getItem(name);
-        if (!value) return null;
-        const parsed = JSON.parse(value) as StorageValue<CanvasStore>;
-        queuedPersistState = parsed.state as PersistedCanvasState;
-        return parsed;
+// 画布项目不再落地浏览器：daemon 的项目目录是唯一事实源，
+// 这里只保留内存镜像，由 lib/canvas/project-sync.ts 负责双向同步。
+export const useCanvasStore = create<CanvasStore>()((set, get) => ({
+    hydrated: false,
+    projects: [],
+    deletedProjects: [],
+    createProject: (title = i18n.t("canvas.project.untitled")) => {
+        const now = new Date().toISOString();
+        const id = nanoid();
+        const project: CanvasProject = {
+            id,
+            title,
+            createdAt: now,
+            updatedAt: now,
+            nodes: [],
+            connections: [],
+            chatSessions: [],
+            activeChatId: null,
+            backgroundMode: "lines",
+            showImageInfo: false,
+            viewport: initialViewport,
+        };
+        set((state) => ({ projects: [project, ...state.projects] }));
+        return id;
     },
-    setItem: (name, value) => {
-        const nextState = value.state as PersistedCanvasState;
-        if (queuedPersistState && queuedPersistState.projects === nextState.projects && queuedPersistState.deletedProjects === nextState.deletedProjects) return;
-        queuedPersistState = nextState;
-        if (saveTimer) clearTimeout(saveTimer);
-        saveTimer = setTimeout(() => {
-            saveTimer = null;
-            void localForageStorage.setItem(name, JSON.stringify(value));
-        }, 400);
+    importProject: (source) => {
+        const now = new Date().toISOString();
+        const project: CanvasProject = {
+            id: nanoid(),
+            title: source.title || i18n.t("canvas.project.imported"),
+            createdAt: source.createdAt || now,
+            updatedAt: now,
+            nodes: source.nodes || [],
+            connections: source.connections || [],
+            chatSessions: source.chatSessions || [],
+            activeChatId: source.activeChatId || null,
+            backgroundMode: source.backgroundMode || "lines",
+            showImageInfo: source.showImageInfo || false,
+            viewport: source.viewport || initialViewport,
+        };
+        set((state) => ({ projects: [project, ...state.projects] }));
+        return project.id;
     },
-    removeItem: (name) => localForageStorage.removeItem(name),
-};
-
-export const useCanvasStore = create<CanvasStore>()(
-    persist(
-        (set, get) => ({
-            hydrated: false,
-            projects: [],
-            deletedProjects: [],
-            createProject: (title = i18n.t("canvas.project.untitled")) => {
-                const now = new Date().toISOString();
-                const id = nanoid();
-                const project: CanvasProject = {
-                    id,
-                    title,
-                    createdAt: now,
-                    updatedAt: now,
-                    nodes: [],
-                    connections: [],
-                    chatSessions: [],
-                    activeChatId: null,
-                    backgroundMode: "lines",
-                    showImageInfo: false,
-                    viewport: initialViewport,
-                };
-                set((state) => ({ projects: [project, ...state.projects] }));
-                return id;
-            },
-            importProject: (source) => {
-                const now = new Date().toISOString();
-                const project: CanvasProject = {
-                    id: nanoid(),
-                    title: source.title || i18n.t("canvas.project.imported"),
-                    createdAt: source.createdAt || now,
-                    updatedAt: now,
-                    nodes: source.nodes || [],
-                    connections: source.connections || [],
-                    chatSessions: source.chatSessions || [],
-                    activeChatId: source.activeChatId || null,
-                    backgroundMode: source.backgroundMode || "lines",
-                    showImageInfo: source.showImageInfo || false,
-                    viewport: source.viewport || initialViewport,
-                };
-                set((state) => ({ projects: [project, ...state.projects] }));
-                return project.id;
-            },
-            openProject: (id) => {
-                return get().projects.find((item) => item.id === id) || null;
-            },
-            renameProject: (id, title) =>
-                set((state) => ({
-                    projects: state.projects.map((project) => (project.id === id ? { ...project, title: title.trim() || project.title, updatedAt: new Date().toISOString() } : project)),
-                })),
-            deleteProjects: (ids) =>
-                set((state) => {
-                    const now = new Date().toISOString();
-                    const removing = new Set(ids);
-                    const projects = state.projects.filter((project) => !removing.has(project.id));
-                    const deletedProjects = [...state.deletedProjects.filter((item) => !removing.has(item.id)), ...ids.map((id) => ({ id, deletedAt: now }))];
-                    return { projects, deletedProjects };
-                }),
-            replaceProjects: (projects, deletedProjects = []) => set({ projects, deletedProjects }),
-            updateProject: (id, patch) =>
-                set((state) => ({
-                    projects: state.projects.map((project) => (project.id === id ? { ...project, ...patch, updatedAt: new Date().toISOString() } : project)),
-                })),
+    openProject: (id) => {
+        return get().projects.find((item) => item.id === id) || null;
+    },
+    renameProject: (id, title) =>
+        set((state) => ({
+            projects: state.projects.map((project) => (project.id === id ? { ...project, title: title.trim() || project.title, updatedAt: new Date().toISOString() } : project)),
+        })),
+    deleteProjects: (ids) =>
+        set((state) => {
+            const now = new Date().toISOString();
+            const removing = new Set(ids);
+            const projects = state.projects.filter((project) => !removing.has(project.id));
+            const deletedProjects = [...state.deletedProjects.filter((item) => !removing.has(item.id)), ...ids.map((id) => ({ id, deletedAt: now }))];
+            return { projects, deletedProjects };
         }),
-        {
-            name: CANVAS_STORE_KEY,
-            storage: canvasStorage,
-            partialize: (state) =>
-                ({
-                    projects: state.projects,
-                    deletedProjects: state.deletedProjects,
-                }) as StorageValue<CanvasStore>["state"],
-            onRehydrateStorage: () => () => {
-                useCanvasStore.setState({ hydrated: true });
-            },
-        },
-    ),
-);
+    replaceProjects: (projects, deletedProjects = []) => set({ projects, deletedProjects }),
+    updateProject: (id, patch) =>
+        set((state) => ({
+            projects: state.projects.map((project) => (project.id === id ? { ...project, ...patch, updatedAt: new Date().toISOString() } : project)),
+        })),
+}));

@@ -1,0 +1,12 @@
+{
+    "name": "solgrid-canvas",
+    "private": true,
+    "version": "0.1.0",
+    "description": "solgrid 平台特化的本地无限画布：daemon + web",
+    "scripts": {
+        "daemon": "node daemon/server.mjs",
+        "smoke": "node daemon/smoke.mjs",
+        "dev": "npm --prefix web run dev",
+        "build": "npm --prefix web run build"
+    }
+}
