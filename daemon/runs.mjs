@@ -19,7 +19,20 @@ const TERMINAL = new Set(["COMPLETED", "FAILED", "BLOCKED", "TIMED_OUT", "STOPPE
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// 参数里可能夹带 data URL（参考图的本地副本），入库前替换掉，避免撑大 DB 和列表响应
+// 参数里可能夹带 data URL（参考图的本地副本）：入队时落成项目资产再入库，避免撑大 DB 和日志
+function materializeReferences(body, projectId, projectsDir) {
+    if (!Array.isArray(body?.references)) return body;
+    const references = body.references.map((ref) => {
+        if (typeof ref !== "string" || !ref.startsWith("data:")) return ref;
+        const match = /^data:([^;]+);base64,([\s\S]+)$/.exec(ref);
+        if (!match) return ref;
+        const asset = saveAssetFromBuffer(Buffer.from(match[2], "base64"), projectsDir, projectId, match[1]);
+        return `asset:${projectId}/${asset.file}`;
+    });
+    return { ...body, references };
+}
+
+// 入库/日志前的脱敏：data URL 只留标记（执行用的 body 必须已经 materialize 过）
 function sanitizeParams(value) {
     if (typeof value === "string") return value.startsWith("data:") && value.length > 2000 ? "data:<omitted>" : value;
     if (Array.isArray(value)) return value.map(sanitizeParams);
@@ -331,15 +344,18 @@ export function createRunEngine({ store, gateway, projectsDir, bodyDir, broadcas
 
     return {
         enqueue({ projectId, nodeId, provider, endpoint, body }) {
+            const materialized = materializeReferences(body ?? {}, projectId, projectsDir);
             const run = store.create({
                 id: crypto.randomUUID(),
                 projectId,
                 nodeId,
                 provider,
                 endpoint,
-                body: sanitizeParams(body ?? {}),
+                body: sanitizeParams(materialized),
                 idempotencyKey: crypto.randomUUID(),
             });
+            // 执行时使用原始（已落资产的）body，避免脱敏后的占位符
+            run.body = materialized;
             emit(run);
             setTimeout(() => void loop(), 0);
             return run;

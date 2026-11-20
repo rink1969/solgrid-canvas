@@ -115,6 +115,24 @@ try {
     const imageBody = readBodies().find((item) => item?.input?.messages?.[0]?.content?.[0]?.text === "a cat");
     check("图片 body 符合 alibaba 契约", Boolean(imageBody) && /^\d+\*\d+$/.test(imageBody.parameters?.size || ""), JSON.stringify(imageBody).slice(0, 300));
 
+    // data URL 参考图：入队时落成资产并进入请求体（此前被 sanitizeParams 脱敏成占位符）
+    const tinyPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const refRun = await fetch(`${BASE}/api/runs`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ projectId: "smokeproj", nodeId: "node1", provider: "alibaba", endpoint: "/v1/image/qwen-image-3.0", params: { prompt: "ref cat", references: [`data:image/png;base64,${tinyPng}`] } }),
+    }).then((r) => r.json());
+    let refDone = null;
+    for (let i = 0; i < 80; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const payload = await fetch(`${BASE}/api/runs/${refRun.run.id}`, { headers }).then((r) => r.json());
+        refDone = payload.run;
+        if (refDone && ["completed", "failed", "uncertain", "stopped"].includes(refDone.status)) break;
+    }
+    const refBody = readBodies().find((item) => item?.input?.messages?.[0]?.content?.[0]?.text === "ref cat");
+    const refImages = (refBody?.input?.messages?.[0]?.content || []).filter((item) => item?.image);
+    check("data URL 参考图进入请求体", refDone?.status === "completed" && refImages.length === 1, JSON.stringify(refBody).slice(0, 300));
+
     // family 映射：视频 + 参考素材上传
     const videoRun = await fetch(`${BASE}/api/runs`, {
         method: "POST",
