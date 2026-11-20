@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Modal, Select, Tag } from "antd";
+import { Button, Modal, Tag } from "antd";
 import { Bot, PanelRightClose } from "lucide-react";
 import { useMatch } from "react-router-dom";
 
@@ -234,17 +234,6 @@ export function AcpAgentPanel() {
                 <div className="ml-auto flex items-center gap-1">
                     <Button size="small" type="text" icon={<PanelRightClose className="size-4" />} onClick={closePanel} aria-label="关闭" />
                 </div>
-            </div>
-
-            <div className="flex items-center gap-2 px-3 py-1.5">
-                <Select
-                    size="small"
-                    className="min-w-0 flex-1"
-                    value={current || undefined}
-                    options={models.map((item) => ({ value: item.id, label: item.displayName }))}
-                    placeholder="选择模型"
-                    onChange={(value: string) => void changeModel(value)}
-                />
             </div>
 
             {available === false ? (
