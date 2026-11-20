@@ -17,6 +17,26 @@ import { createGateway } from "./gateway.mjs";
 import { createRunEngine } from "./runs.mjs";
 
 const VERSION = "0.1.0";
+const WEB_DIST = process.env.CANVAS_WEB_DIST || path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")), "..", "web", "dist");
+const MIME = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".ico": "image/x-icon",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+};
 const PORT = Number(process.env.CANVAS_PORT || 17371);
 const HOST = "127.0.0.1";
 const ROOT = process.env.CANVAS_HOME || path.join(os.homedir(), ".solgrid-canvas");
@@ -90,9 +110,56 @@ function applyCors(req, res) {
     return false;
 }
 
+function cookieValue(req, name) {
+    for (const part of String(req.headers.cookie || "").split(";")) {
+        const index = part.indexOf("=");
+        if (index < 0) continue;
+        if (part.slice(0, index).trim() === name) return part.slice(index + 1).trim();
+    }
+    return "";
+}
+
 function authorized(req) {
-    const token = req.headers["x-canvas-token"];
-    return typeof token === "string" && token.length === TOKEN.length && crypto.timingSafeEqual(Buffer.from(token), Buffer.from(TOKEN));
+    // 生产模式同源访问用 HttpOnly cookie；开发模式由 Vite 代理注入 header
+    const token = req.headers["x-canvas-token"] || cookieValue(req, "canvas_token");
+    if (typeof token !== "string" || token.length !== TOKEN.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(token), Buffer.from(TOKEN));
+}
+
+// 生产：daemon 直接托管构建后的前端（SPA fallback + 首次访问写鉴权 cookie）
+function serveStatic(req, res, pathname) {
+    let relative = decodeURIComponent(pathname);
+    if (relative === "/" || relative === "") relative = "/index.html";
+    const dist = path.resolve(WEB_DIST);
+    const target = path.resolve(dist, `.${relative}`);
+    if (!target.startsWith(dist)) {
+        res.writeHead(400);
+        res.end("bad path");
+        return;
+    }
+    const exists = fs.existsSync(target) && fs.statSync(target).isFile();
+    if (!exists && path.extname(relative)) {
+        res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+        res.end("not found");
+        return;
+    }
+    const page = path.join(dist, "index.html");
+    if (!exists && !fs.existsSync(page)) {
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        res.end("<h1>solgrid-canvas</h1><p>前端还没构建：在仓库根目录运行 <code>npm run build</code> 后刷新。</p>");
+        return;
+    }
+    const file = exists ? target : page;
+    const ext = path.extname(file).toLowerCase();
+    const headers = { "content-type": MIME[ext] || "application/octet-stream" };
+    if (ext === ".html") {
+        headers["cache-control"] = "no-store";
+        headers["set-cookie"] = `canvas_token=${TOKEN}; Path=/; HttpOnly; SameSite=Lax`;
+    } else {
+        headers["cache-control"] = "public, max-age=31536000, immutable";
+    }
+    res.writeHead(200, headers);
+    fs.createReadStream(file).pipe(res);
 }
 
 function broadcast(event, exceptClientId) {
@@ -143,6 +210,10 @@ async function handle(req, res) {
     }
 
     applyCors(req, res);
+    if (!pathname.startsWith("/api") && req.method === "GET") {
+        serveStatic(req, res, pathname);
+        return;
+    }
     if (!authorized(req)) {
         sendJson(res, 401, { error: "unauthorized", hint: "缺少或错误的 x-canvas-token（见 ~/.solgrid-canvas/daemon.json）" });
         return;

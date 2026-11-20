@@ -14,7 +14,9 @@
         "smoke:runs": "node daemon/smoke-runs.mjs",
         "smoke:mcp": "node daemon/smoke-mcp.mjs",
         "smoke:agent": "node daemon/smoke-agent.mjs",
-        "smoke:video": "node daemon/smoke-video-edit.mjs"
+        "smoke:video": "node daemon/smoke-video-edit.mjs",
+        "start": "node daemon/server.mjs",
+        "setup": "node bin/solgrid-canvas.mjs setup"
     },
     "bin": {
         "solgrid-canvas": "bin/solgrid-canvas.mjs"

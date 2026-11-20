@@ -113,6 +113,8 @@ function installAgent(agent) {
         log("用法：solgrid-canvas install --agent codex|claude|dsh");
         return 1;
     }
+    const envPath = ensureDevEnv();
+    if (envPath) log(`开发模式环境变量已写入：${envPath}`);
     const skillPath = installSkill();
     if (skillPath) log(`技能包已安装：${skillPath}`);
     else log("技能包未找到（仓库缺少 skills/solgrid-canvas/SKILL.md）");
@@ -260,9 +262,79 @@ function syncConfig({ from = "desktop", target = "acp", dryRun = false } = {}) {
     return { ok: true, changed: true, message: report.join(", ") };
 }
 
+
+// 开发模式需要的 Vite 代理 token（生产模式由 daemon 下发 HttpOnly cookie，不需要）
+function ensureDevEnv() {
+    const daemonFile = path.join(HOME, "daemon.json");
+    if (!fs.existsSync(daemonFile)) return null;
+    let token = "";
+    try {
+        token = JSON.parse(fs.readFileSync(daemonFile, "utf8")).token || "";
+    } catch {
+        return null;
+    }
+    if (!token) return null;
+    const envPath = path.join(ROOT, "web", ".env.local");
+    const content = `# 由 solgrid-canvas CLI 生成（仅 Vite dev server 读取）\nCANVAS_DAEMON_URL=http://127.0.0.1:${PORT}\nCANVAS_TOKEN=${token}\n`;
+    fs.writeFileSync(envPath, content);
+    return envPath;
+}
+
+async function waitHealth(ms = 6000) {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+        try {
+            if ((await fetch(`http://127.0.0.1:${PORT}/health`)).ok) return true;
+        } catch {
+            /* 等启动 */
+        }
+        await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    return false;
+}
+
+async function setup() {
+    const nodeMajor = Number(process.versions.node.split(".")[0]);
+    if (nodeMajor < 22) {
+        log(`✗ Node ${process.versions.node}，需要 ≥22`);
+        return 1;
+    }
+    if (!fs.existsSync(path.join(ROOT, "web", "node_modules"))) {
+        log("安装 web 依赖…");
+        const install = spawn(IS_WIN ? "npm.cmd" : "npm", ["--prefix", path.join(ROOT, "web"), "install"], { cwd: ROOT, stdio: "inherit", shell: IS_WIN });
+        await new Promise((resolve) => install.on("exit", resolve));
+    }
+    log("构建前端…");
+    const build = spawn(IS_WIN ? "npm.cmd" : "npm", ["run", "build"], { cwd: ROOT, stdio: "inherit", shell: IS_WIN });
+    const code = await new Promise((resolve) => build.on("exit", resolve));
+    if (code !== 0) {
+        log("✗ 构建失败");
+        return 1;
+    }
+    if (!(await waitHealth(500))) {
+        log("启动 daemon…");
+        const child = spawn(process.execPath, [DAEMON], { cwd: ROOT, detached: true, stdio: "ignore", env: { ...process.env, CANVAS_HOME: HOME, CANVAS_PORT: String(PORT) } });
+        child.unref();
+        if (!(await waitHealth())) {
+            log("✗ daemon 启动失败，检查端口占用或日志");
+            return 1;
+        }
+    }
+    const envPath = ensureDevEnv();
+    log(`✓ daemon 已就绪：http://127.0.0.1:${PORT}`);
+    log(`✓ 前端已构建：${path.join(ROOT, "web", "dist")}`);
+    if (envPath) log(`✓ 开发环境变量：${envPath}`);
+    log("\n下一步：");
+    log("  1) 打开画布：npm start（或 npm run dev 进入开发模式）");
+    log("  2) 给本地 Agent 装 MCP：node bin/solgrid-canvas.mjs install --agent <codex|claude|dsh>");
+    log("  3) 检查环境：node bin/solgrid-canvas.mjs doctor");
+    return 0;
+}
+
 async function main() {
     if (command === "daemon") return forward(process.execPath, [DAEMON]);
     if (command === "mcp") return forward(process.execPath, [MCP]);
+    if (command === "setup") return process.exit(await setup());
     if (command === "doctor") return process.exit(await doctor());
     if (command === "sync-config") {
         const readFlag = (name, fallback) => {
@@ -289,6 +361,7 @@ async function main() {
   solgrid-canvas mcp                       以 stdio MCP server 运行（给 Agent 配）
   solgrid-canvas install --agent codex|claude|dsh   注册 MCP 并安装技能包
   solgrid-canvas doctor                    检查 Node / solgrid CLI / daemon / ffmpeg
+  solgrid-canvas setup                     安装依赖 + 构建前端 + 启动 daemon + 写开发环境变量
   solgrid-canvas sync-config [--from desktop] [--profile acp] [--dry-run]
                                            把 desktop 的 provider/默认模型同步到 ACP profile
 `);

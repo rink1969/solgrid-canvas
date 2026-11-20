@@ -30,22 +30,33 @@ solgrid是一个本地Agent友好的视频制作平台。
 
 4. 用户可以通过与本地Agent对话来操作画布。在画布上也可以复用本地Agent的能力，比如本地Agent已经配置好一个拉片的skill，画布上可以使用它来对画布上的视频节点进行拉片分析，产出的图片和文字描述以节点的方式自动放在画布上。
 
-## 快速开始（开发）
-
-当前进度：**M0（daemon + 项目目录存储）**。生成、资产、Agent 桥还没接上。
+## 快速开始（生产）
 
 ```bash
-# 1. 起本地 daemon（零依赖，不用 npm install）
-npm run daemon
-
-# 2. 把 daemon 打印的 token 填进 web/.env.local（参考 web/.env.example）
-cp web/.env.example web/.env.local && $EDITOR web/.env.local
-
-# 3. 起画布前端
-npm run dev
+git clone git@github.com:rink1969/solgrid-canvas.git
+cd solgrid-canvas
+npm --prefix web install
+npm run build
+npm start
+# 打开 http://127.0.0.1:17371
 ```
 
-项目数据落在 `~/.solgrid-canvas/projects/<id>/`：`project.json`（元信息）+ `canvas.json`（JSON Canvas 1.0，Agent/Obsidian 可直接读写）+ `assets/`（M1 接入）。
+`npm start` 会启动 daemon 并直接托管构建后的前端；首次访问自动下发鉴权 cookie。要求本机有 `solgrid` CLI 并已登录；视频片段重生成还需要 `ffmpeg`/`ffprobe`。
+
+### 让 Agent 帮你装
+
+把 [AI_SETUP.md](AI_SETUP.md) 整篇发给本地 Agent，它会自动安装依赖、启动 daemon、识别自己并注册 MCP。
+
+## 快速开始（开发）
+
+```bash
+npm run daemon      # 终端 1
+npm run dev         # 终端 2，http://localhost:3000
+```
+
+`install` 命令会自动把 token 写进 `web/.env.local` 供 Vite 代理使用。
+
+项目数据落在 `~/.solgrid-canvas/projects/<id>/`：`project.json`（元信息）+ `canvas.json`（JSON Canvas 1.0，Agent 可直接读写）+ `assets/`（内容寻址资产）。
 
 ## 给 Agent 接入
 
@@ -65,6 +76,7 @@ node bin/solgrid-canvas.mjs sync-config     # 把桌面版的 provider/默认模
 | 文档 | 内容 |
 |---|---|
 | [REQUIREMENTS 即本文件](#canvas) | 需求与产品定位 |
+| [AI_SETUP.md](AI_SETUP.md) | 让本地 Agent 自动安装并配置画布 |
 | [TECH_PLAN.md](TECH_PLAN.md) | 技术方案：架构、子系统、接口、里程碑、风险 |
 | [notes/solgrid-findings.md](notes/solgrid-findings.md) | 平台实测结论（并发、幂等、URL 过期、日预算、无 mask inpaint） |
 | [notes/lapian-methodology.md](notes/lapian-methodology.md) | 拉片方法论（抽帧、拼图、三轮 vision、产出布点） |
