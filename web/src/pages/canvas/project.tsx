@@ -16,12 +16,12 @@ import { setActiveProjectId } from "@/lib/canvas/active-project";
 import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
-import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { cropDataUrl, splitDataUrl, upscaleDataUrl } from "@/lib/canvas/canvas-image-data";
 import { fitNodeSize, nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
+import { compositeInpaint, prepareInpaintEdit } from "@/lib/canvas/canvas-local-inpaint";
 import { captureVideoFrame, type VideoFramePosition } from "@/lib/canvas/canvas-video-frame";
 import { App, Button, Modal } from "antd";
 import { NODE_DEFAULT_SIZE, getNodeSpec } from "@/constant/canvas";
@@ -2156,14 +2156,11 @@ function InfiniteCanvasPage() {
         async (node: CanvasNodeData, payload: CanvasImageMaskEditPayload) => {
             if (!node.metadata?.content) return;
             const userPrompt = payload.prompt.trim();
-            const prompt = t("canvas.projectPage.maskPrompt", { source: imageReferenceLabel(0), mask: imageReferenceLabel(1), prompt: userPrompt });
+            const prompt = t("canvas.projectPage.maskInpaintPrompt", { prompt: userPrompt });
             setMaskEditNodeId(null);
             const maskImage = await uploadImage(payload.maskDataUrl);
             const maskNodeId = nanoid();
             const childId = nanoid();
-            const source = { id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey };
-            const maskSource = { id: maskNodeId, name: "mask.png", type: maskImage.mimeType || "image/png", dataUrl: maskImage.url, storageKey: maskImage.storageKey };
-            const references = [source, maskSource];
             const childMetadata = payload.generate ? { prompt, status: NODE_STATUS_LOADING } : { prompt };
             setNodes((prev) => [
                 ...prev,
@@ -2198,18 +2195,29 @@ function InfiniteCanvasPage() {
             setRunningNodeId(childId);
             const controller = startGenerationRequest(childId, node.id, childId);
             try {
+                // 1) 按蒙版算 bbox，裁出局部原图 + 黑白蒙版
+                const inpaint = await prepareInpaintEdit(node.metadata.content, payload.selectionMaskDataUrl);
+                // 2) 只对局部做图生图
                 const uploaded = await runSolgridImageEdit({
                     node,
                     prompt,
-                    references: [source.storageKey, maskSource.storageKey].filter((key): key is string => Boolean(key)),
+                    references: [inpaint.sourceCrop, inpaint.maskCrop],
                     childId,
                     signal: controller.signal,
                 });
-                const size = fitNodeSize(uploaded.width, uploaded.height, node.width, node.height);
+                // 3) 把结果按羽化蒙版贴回原图，尽量只改涂抹区域
+                let finalImage: Awaited<ReturnType<typeof uploadImage>> | typeof uploaded = uploaded;
+                try {
+                    const composed = await compositeInpaint(node.metadata.content, uploaded.url, payload.selectionMaskDataUrl, inpaint.rect);
+                    finalImage = await uploadImage(composed);
+                } catch {
+                    finalImage = uploaded;
+                }
+                const size = fitNodeSize(finalImage.width, finalImage.height, node.width, node.height);
                 setNodes((prev) =>
                     prev.map((item) =>
                         item.id === childId
-                            ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, provider: uploaded.provider, endpoint: uploaded.endpoint } }
+                            ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(finalImage), prompt, provider: uploaded.provider, endpoint: uploaded.endpoint } }
                             : item,
                     ),
                 );
