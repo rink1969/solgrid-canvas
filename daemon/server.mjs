@@ -517,8 +517,11 @@ server.listen(PORT, HOST, () => {
     log("把 token 填到 web/.env.local 的 CANVAS_TOKEN，然后 npm run dev");
 });
 
-process.on("SIGINT", () => {
+function shutdown() {
     log("shutting down");
     agent.close();
     server.close(() => process.exit(0));
-});
+}
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);

@@ -44,6 +44,7 @@ function mcpEntry() {
         env: [
             { name: "CANVAS_HOME", value: ROOT },
             { name: "CANVAS_PORT", value: String(PORT) },
+            ...(process.env.CANVAS_IMPORT_ROOTS ? [{ name: "CANVAS_IMPORT_ROOTS", value: process.env.CANVAS_IMPORT_ROOTS }] : []),
         ],
     };
 }
@@ -112,6 +113,26 @@ function createConnection({ adapter, onNotification, onRequest, log }) {
     }
 
     return { request, respond, notify, close: () => child.kill() };
+}
+
+function sessionFile(cwd) {
+    return path.join(cwd, "agent-session.json");
+}
+
+function readSessionFile(cwd) {
+    try {
+        return JSON.parse(fs.readFileSync(sessionFile(cwd), "utf8"));
+    } catch {
+        return null;
+    }
+}
+
+function writeSessionFile(cwd, sessionId) {
+    try {
+        fs.writeFileSync(sessionFile(cwd), JSON.stringify({ sessionId, updatedAt: new Date().toISOString() }, null, 2));
+    } catch (error) {
+        log(`[acp] 会话文件写入失败：${error.message}`);
+    }
 }
 
 export function createAgentManager({ broadcast, log }) {
@@ -188,9 +209,25 @@ export function createAgentManager({ broadcast, log }) {
             const existing = sessions.get(projectId);
             if (existing) return existing;
             const client = await ensureConnection();
+
+            // 先尝试恢复上次的会话（daemon 重启后仍能接上上下文）
+            const saved = readSessionFile(cwd);
+            if (saved?.sessionId) {
+                try {
+                    const resumed = await client.request("session/resume", { sessionId: saved.sessionId, cwd, mcpServers: [mcpEntry()] });
+                    const session = { sessionId: saved.sessionId, configOptions: resumed?.configOptions || [], running: false, transcript: [], resumed: true };
+                    sessions.set(projectId, session);
+                    emit(projectId, { kind: "session", sessionId: session.sessionId, configOptions: session.configOptions, resumed: true });
+                    return session;
+                } catch (error) {
+                    log(`[acp] 恢复会话失败，改为新建：${error.message}`);
+                }
+            }
+
             const result = await client.request("session/new", { cwd, mcpServers: [mcpEntry()] });
             const session = { sessionId: result.sessionId, configOptions: result.configOptions || [], running: false, transcript: [] };
             sessions.set(projectId, session);
+            writeSessionFile(cwd, session.sessionId);
             emit(projectId, { kind: "session", sessionId: session.sessionId, configOptions: session.configOptions });
             return session;
         },
@@ -218,6 +255,16 @@ export function createAgentManager({ broadcast, log }) {
                 })
                 .catch((error) => {
                     session.running = false;
+                    if (/not found|unknown session|invalid session/i.test(error.message)) {
+                        try {
+                            fs.rmSync(sessionFile(path.join(ROOT, "projects", projectId)), { force: true });
+                        } catch {
+                            /* 忽略清理失败 */
+                        }
+                        sessions.delete(projectId);
+                        emit(projectId, { kind: "done", error: "Agent 会话已失效，已重置，请重新发送" });
+                        return;
+                    }
                     emit(projectId, { kind: "done", error: error.message });
                 });
             return { ok: true };

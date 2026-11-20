@@ -35,9 +35,10 @@ description: >
 3. **生成前先确认模型**：节点上没选模型时先 `canvas_list_tools` + `canvas_inspect_tool` 确认 provider/endpoint 和参数，再 `canvas_run_nodes`。
 4. **生成一定会请求用户审批**：`canvas_run_nodes` 会阻塞等待用户在画布上点“允许”。用户不点或拒绝就不要重试，先把情况告诉用户。
 5. **参考素材**：上游连线节点的资产会自动作为参考图；不要把本地路径硬塞进 params。
-6. **产物获取**：`canvas_watch_run` 返回 `outputs[].storageKey`（形如 `asset:<projectId>/<sha256>.<ext>`），需要再放到画布上用 `canvas_place_artifacts` 的 `storageKey` 字段。
-7. **失败不静默**：run 状态为 `failed` / `uncertain` 时，把 `error` 转述给用户；`uncertain` 不要自动重跑。
-8. **凭证**：不要读取或传递 solgrid API Key；一切生成由本地 daemon 完成。
+6. **导入路径受限**：`canvas_import_local` / `canvas_place_artifacts` 只接受项目目录、`~/.solgrid-canvas/inbox` 或 `CANVAS_IMPORT_ROOTS` 配置的目录，敏感目录一律拒绝；被拒绝时不要换路径绕过，让用户把文件放进允许目录。
+7. **产物获取**：`canvas_watch_run` 返回 `outputs[].storageKey`（形如 `asset:<projectId>/<sha256>.<ext>`），需要再放到画布上用 `canvas_place_artifacts` 的 `storageKey` 字段。
+8. **失败不静默**：run 状态为 `failed` / `uncertain` 时，把 `error` 转述给用户；`uncertain` 不要自动重跑。
+9. **凭证**：不要读取或传递 solgrid API Key；一切生成由本地 daemon 完成。
 
 ## 典型流程
 

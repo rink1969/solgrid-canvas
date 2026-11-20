@@ -51,7 +51,10 @@ function diffProject(previous: CanvasProject, next: CanvasProject): CanvasOp[] {
     for (const [id, node] of nextNodes) {
         const before = previousNodes.get(id);
         if (!before) ops.push({ type: "add_node", node });
-        else if (before !== (node as CanvasNodeData)) ops.push({ type: "update_node", id, patch: node });
+        else if (before !== (node as CanvasNodeData)) {
+            const patch = changedNodePatch(before, node as CanvasNodeData);
+            if (Object.keys(patch).length) ops.push({ type: "update_node", id, patch });
+        }
     }
 
     const previousEdges = new Map(previous.connections.map((edge) => [edge.id, edge]));
@@ -71,6 +74,50 @@ function diffProject(previous: CanvasProject, next: CanvasProject): CanvasOp[] {
     return ops;
 }
 
+
+// 只挑出真正变了的字段，冲突重放时不会覆盖别人的改动
+function changedNodePatch(before: CanvasNodeData, after: CanvasNodeData) {
+    const patch: Record<string, unknown> = {};
+    if (before.type !== after.type) patch.type = after.type;
+    if (before.title !== after.title) patch.title = after.title;
+    if (before.position.x !== after.position.x || before.position.y !== after.position.y) patch.position = after.position;
+    if (before.width !== after.width) patch.width = after.width;
+    if (before.height !== after.height) patch.height = after.height;
+    const beforeMeta = (before.metadata || {}) as Record<string, unknown>;
+    const afterMeta = (after.metadata || {}) as Record<string, unknown>;
+    const meta: Record<string, unknown> = {};
+    for (const key of new Set([...Object.keys(beforeMeta), ...Object.keys(afterMeta)])) {
+        if (beforeMeta[key] !== afterMeta[key]) meta[key] = afterMeta[key];
+    }
+    if (Object.keys(meta).length) patch.metadata = meta;
+    return patch;
+}
+
+// 把本地 op 重放到服务端最新文档上：已存在的不重复加、已删除的不再改
+function replayOps(ops: CanvasOp[], fresh: CanvasProject): CanvasOp[] {
+    const nodeIds = new Set(fresh.nodes.map((node) => node.id));
+    const edgeIds = new Set(fresh.connections.map((edge) => edge.id));
+    const replayed: CanvasOp[] = [];
+    for (const op of ops) {
+        if (op.type === "add_node") {
+            const id = (op.node as { id?: string })?.id;
+            if (id && !nodeIds.has(id)) replayed.push(op);
+        } else if (op.type === "update_node") {
+            if (nodeIds.has(op.id)) replayed.push(op);
+        } else if (op.type === "remove_nodes") {
+            const ids = op.ids.filter((id) => nodeIds.has(id));
+            if (ids.length) replayed.push({ type: "remove_nodes", ids });
+        } else if (op.type === "add_edge") {
+            const edge = op.edge as { id?: string; fromNodeId?: string; toNodeId?: string };
+            if (edge.id && !edgeIds.has(edge.id) && edge.fromNodeId && edge.toNodeId && nodeIds.has(edge.fromNodeId) && nodeIds.has(edge.toNodeId)) replayed.push(op);
+        } else if (op.type === "remove_edges") {
+            const ids = op.ids.filter((id) => edgeIds.has(id));
+            if (ids.length) replayed.push({ type: "remove_edges", ids });
+        }
+    }
+    return replayed;
+}
+
 async function syncProject(project: CanvasProject) {
     const previous = snapshot.get(project.id);
     // 新项目（或没快照）：整份保存，顺便拿到 rev
@@ -82,23 +129,36 @@ async function syncProject(project: CanvasProject) {
         return;
     }
 
-    const ops = diffProject(previous, project);
+    let ops = diffProject(previous, project);
     if (!ops.length) {
         synced.set(project.id, project.updatedAt);
         return;
     }
 
-    try {
-        const result = await daemonApi.postOps(project.id, ops, revs.get(project.id));
-        revs.set(project.id, result.rev);
-    } catch (error) {
-        // rev 冲突或 op 被拒：回退整份保存（单用户场景下按最后写入为准）
-        console.warn("[canvas-sync] op 同步失败，回退整份保存", project.id, error);
-        const result = await daemonApi.putProject(project.id, project);
-        revs.set(project.id, result.rev);
+    for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+            const result = await daemonApi.postOps(project.id, ops, revs.get(project.id));
+            revs.set(project.id, result.rev);
+            snapshot.set(project.id, project);
+            synced.set(project.id, project.updatedAt);
+            return;
+        } catch (error) {
+            // rev 冲突：拉最新文档，把本地 op 重放到新基线上再试，避免整份 PUT 覆盖别人的改动
+            console.warn("[canvas-sync] op 同步冲突，重放到最新文档", project.id, error);
+            const fresh = await daemonApi.getProject(project.id);
+            revs.set(project.id, revOf(fresh));
+            snapshot.set(project.id, fresh);
+            ops = replayOps(ops, fresh);
+            if (!ops.length) {
+                synced.set(project.id, project.updatedAt);
+                return;
+            }
+        }
     }
-    snapshot.set(project.id, project);
-    synced.set(project.id, project.updatedAt);
+
+    // 连续冲突：采纳远端，避免用旧文档覆盖服务端
+    console.warn("[canvas-sync] 多次冲突，采纳服务端最新文档", project.id);
+    await refreshProject(project.id);
 }
 
 async function refreshProject(id: string) {

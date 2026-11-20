@@ -96,7 +96,7 @@ curl -XPOST /api/agent/permissions/:id -d '{"allow":true}'
 
 - 默认适配器：本机 DSH 桌面版（`ELECTRON_RUN_AS_NODE=1 <exe> resources/app.asar/.../bin.js --profile acp`）
 - 自定义：`CANVAS_ACP_COMMAND` + `CANVAS_ACP_ARGS`（JSON 数组）
-- 会话在内存里，daemon 重启后新建；模型/凭证来自 Agent 自身
+- 会话持久化在项目目录 `agent-session.json`，daemon 重启后自动 resume（历史消息不重放）；模型/凭证来自 Agent 自身
 - 桌面版与 ACP 的配置默认隔离：`solgrid-canvas sync-config` 可把 desktop profile 的 `agent-default-model` / `llm-pi-ai.providers`（不含凭证）同步到 ACP profile，并映射成 `acp` 行的默认模型
 
 ## 生成审批

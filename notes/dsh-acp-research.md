@@ -95,7 +95,8 @@ CANVAS_ACP_ARGS=["--profile","acp"]
 - `session/new` 参数：`{ cwd, mcpServers, ... }`。`cwd` 是每会话工作目录——**工作区隔离靠它，不靠 profile**。
 - 每次 `session/new` 都是独立、可持久化的 agent 会话；同一 ACP 连接可并存多个。
 - `session/list` / `session/resume` / `session/close` 支持；`session/load`、分叉、transcript replay、额外目录不支持。
-- 画布 daemon 目前把会话放内存（按项目一个），daemon 重启后新建；要跨重启保留需接 `session/resume`。
+- 画布 daemon 会把 sessionId 写入项目目录 `agent-session.json`，daemon 重启后先 `session/resume`，失败再新建。
+- 注意：resume 恢复的是 Agent 的上下文，**不会重放历史消息**（ACP 不支持 transcript replay），画布面板的历史记录只保留本次 daemon 生命周期内的。
 
 ## 6. 协议要点（实测）
 
@@ -145,7 +146,7 @@ solgrid-canvas sync-config [--from desktop] [--profile acp] [--dry-run]
 
 ## 10. 后续可做
 
-- 接 `session/resume`，让画布会话跨 daemon 重启保留
+- transcript 持久化（daemon 侧落盘）以配合 resume 展示历史
 - 适配器扩展：`codex-acp`、`claude-code-acp`（`CANVAS_ACP_COMMAND/ARGS` 即可，无需改代码）
 - 按项目/技能目录隔离 skills（需确认 skill-filesystem 是否扫描 cwd）
 - 把 ACP 会话的模型选择持久化到项目设置

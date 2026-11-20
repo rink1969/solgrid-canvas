@@ -83,6 +83,36 @@ const MIME_BY_EXT = {
     ".m4a": "audio/mp4",
 };
 
+const PROJECTS_DIR = path.join(ROOT, "projects");
+const INBOX_DIR = path.join(ROOT, "inbox");
+const SENSITIVE_DIRS = [".ssh", ".aws", ".gnupg", ".config", ".dsh", ".codex", ".claude"];
+
+// Agent 只能导入：项目目录、inbox、显式配置的根；敏感目录一律拒绝
+function resolveImportPath(projectId, filePath) {
+    let real;
+    try {
+        real = fs.realpathSync(path.resolve(filePath));
+    } catch {
+        throw new Error(`文件不存在：${filePath}`);
+    }
+    const home = os.homedir();
+    const sensitive = SENSITIVE_DIRS.map((name) => path.join(home, name));
+    if (sensitive.some((dir) => real === dir || real.startsWith(`${dir}${path.sep}`))) {
+        throw new Error(`拒绝导入敏感目录：${real}`);
+    }
+    const extraRoots = (process.env.CANVAS_IMPORT_ROOTS || "")
+        .split(/[;,]/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .map((item) => path.resolve(item));
+    const roots = [path.join(PROJECTS_DIR, projectId), INBOX_DIR, ...extraRoots];
+    if (!roots.some((root) => real === root || real.startsWith(`${root}${path.sep}`))) {
+        throw new Error(`路径不在允许范围：${real}\n允许：项目目录、${INBOX_DIR}${extraRoots.length ? `、${extraRoots.join("、")}` : ""}（可用 CANVAS_IMPORT_ROOTS 添加）`);
+    }
+    if (!fs.statSync(real).isFile()) throw new Error(`不是文件：${filePath}`);
+    return real;
+}
+
 async function uploadFile(projectId, filePath) {
     const buffer = fs.readFileSync(filePath);
     const mime = MIME_BY_EXT[path.extname(filePath).toLowerCase()] || "application/octet-stream";
@@ -276,9 +306,8 @@ const HANDLERS = {
     async canvas_import_local({ projectId, paths }) {
         const results = [];
         for (const filePath of paths) {
-            const stat = fs.statSync(filePath);
-            if (!stat.isFile()) throw new Error(`不是文件：${filePath}`);
-            results.push({ path: filePath, ...(await uploadFile(projectId, filePath)) });
+            const real = resolveImportPath(projectId, filePath);
+            results.push({ path: real, ...(await uploadFile(projectId, real)) });
         }
         return results;
     },
@@ -301,8 +330,9 @@ const HANDLERS = {
                 continue;
             }
             if (!item.path) throw new Error("image/video/audio 产物需要 path 或 storageKey");
-            const uploaded = await uploadFile(projectId, item.path);
-            prepared.push({ kind, title: item.title || path.basename(item.path), ...uploaded });
+            const real = resolveImportPath(projectId, item.path);
+            const uploaded = await uploadFile(projectId, real);
+            prepared.push({ kind, title: item.title || path.basename(real), ...uploaded });
         }
 
         const placements = layoutArtifacts({ anchor, items: prepared, nodes: project.nodes });

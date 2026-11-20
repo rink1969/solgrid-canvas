@@ -145,7 +145,8 @@ try {
     });
     check("apply_ops 生效", !applied.isError && applied.data.rev > state.data.project.rev, JSON.stringify(applied.data));
 
-    const pngPath = path.join(HOME, "frame.png");
+    fs.mkdirSync(path.join(HOME, "inbox"), { recursive: true });
+    const pngPath = path.join(HOME, "inbox", "frame.png");
     fs.writeFileSync(pngPath, TINY_PNG);
     const placed = await call("canvas_place_artifacts", {
         projectId: "mcpproj",
@@ -162,6 +163,20 @@ try {
     check("图片节点在锚点右侧", image && image.x > 320, JSON.stringify(image));
     check("文本节点在图片右侧（分列）", text && text.x > image.x, JSON.stringify({ image: image?.x, text: text?.x }));
     check("产物自动连线", afterPlace.data.connections.filter((edge) => edge.fromNodeId === "anchor").length === 2);
+
+    // 导入白名单：项目目录内可导入，任意路径/敏感目录拒绝
+    const insidePath = path.join(HOME, "projects", "mcpproj", "inside.png");
+    fs.writeFileSync(insidePath, TINY_PNG);
+    const inside = await call("canvas_import_local", { projectId: "mcpproj", paths: [insidePath] });
+    check("项目目录内文件可导入", !inside.isError && Array.isArray(inside.data), JSON.stringify(inside.data).slice(0, 200));
+
+    const outsidePath = path.join(HOME, "outside.png");
+    fs.writeFileSync(outsidePath, TINY_PNG);
+    const outside = await call("canvas_import_local", { projectId: "mcpproj", paths: [outsidePath] });
+    check("项目目录外文件被拒绝", outside.isError, JSON.stringify(outside.data).slice(0, 200));
+
+    const sensitive = await call("canvas_import_local", { projectId: "mcpproj", paths: [path.join(os.homedir(), ".dsh", ".credentials.yaml")] });
+    check("敏感目录被拒绝", sensitive.isError, JSON.stringify(sensitive.data).slice(0, 200));
 
     const run = await call("canvas_run_nodes", { projectId: "mcpproj", nodeId: "anchor", approvalTimeoutSeconds: 20 });
     check("run_nodes 经审批后返回 runId", !run.isError && typeof run.data?.runId === "string", JSON.stringify(run.data).slice(0, 300));

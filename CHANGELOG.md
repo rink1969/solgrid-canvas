@@ -36,6 +36,9 @@
 + [新增] 产物布点引擎：图片一列、文本一列，从锚点右侧自动排布并避让已有节点，Agent 不需要自己算坐标。
 + [新增] 生成审批：Agent 发起生成时画布弹出确认框，用户点「允许本次生成」才会入队；拒绝或超时不产生费用。
 + [新增] `solgrid-canvas` CLI：`daemon` / `mcp` / `doctor` / `install --agent codex|claude|dsh`，安装时注册 MCP 并安装技能包；DSH 会直接写入 profile 的 `cordis.patch.yml`（自动备份）而不是只打印 JSON。
++ [修复] MCP 导入路径白名单：`canvas_import_local` / `canvas_place_artifacts` 只允许项目目录、inbox 与 `CANVAS_IMPORT_ROOTS`，拒绝 `~/.ssh` 等敏感目录。
++ [修复] 画布写入冲突不再整份 PUT 覆盖：op 带 rev，409 时把本地 op 重放到最新文档（字段级 patch），多次冲突才采纳服务端。
++ [新增] ACP 会话持久化：sessionId 写入项目目录 `agent-session.json`，daemon 重启后自动 `session/resume` 接上上下文。
 + [新增] `solgrid-canvas sync-config`：把桌面版 DSH 的 provider 定义与默认模型同步到 ACP profile（按 id 合并、幂等、自动备份、不含凭证），并映射成 `acp` 行的默认模型。
 + [修复] `solgrid-canvas` 技能缺少 YAML frontmatter（name/description），导致 DSH 技能发现不到；补上后 ACP 会话与桌面会话都能看到并加载。
 + [新增] 画布内嵌「本地 Agent」对话（ACP）：daemon 以 stdio 拉起 ACP Agent（默认 DSH 桌面版），`session/new` 注入 canvas MCP，支持消息流、工具调用过程、停止、模型切换与权限确认；模型与凭证完全来自本地 Agent。

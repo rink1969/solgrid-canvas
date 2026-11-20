@@ -11,15 +11,31 @@ const HOME = fs.mkdtempSync(path.join(os.tmpdir(), "solgrid-canvas-acp-"));
 const BASE = `http://127.0.0.1:${PORT}`;
 const headers = { "content-type": "application/json", "x-canvas-token": TOKEN };
 
-const daemon = spawn(process.execPath, [path.join(here, "server.mjs")], {
-    cwd: here,
-    env: { ...process.env, CANVAS_HOME: HOME, CANVAS_PORT: String(PORT), CANVAS_TOKEN: TOKEN },
-    stdio: ["ignore", "pipe", "pipe"],
-});
-daemon.stdout.on("data", (chunk) => process.stdout.write(`[daemon] ${chunk}`));
-daemon.stderr.on("data", (chunk) => {
-    if (!/ExperimentalWarning/.test(String(chunk))) process.stderr.write(`[daemon:err] ${chunk}`);
-});
+function spawnDaemon() {
+    const child = spawn(process.execPath, [path.join(here, "server.mjs")], {
+        cwd: here,
+        env: { ...process.env, CANVAS_HOME: HOME, CANVAS_PORT: String(PORT), CANVAS_TOKEN: TOKEN },
+        stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.stdout.on("data", (chunk) => process.stdout.write(`[daemon] ${chunk}`));
+    child.stderr.on("data", (chunk) => {
+        if (!/ExperimentalWarning/.test(String(chunk))) process.stderr.write(`[daemon:err] ${chunk}`);
+    });
+    return child;
+}
+let daemon = spawnDaemon();
+
+async function waitHealth() {
+    for (let i = 0; i < 80; i++) {
+        try {
+            if ((await fetch(`${BASE}/health`)).ok) return;
+        } catch {
+            /* 等启动 */
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error("daemon 未启动");
+}
 
 const api = async (pathname, init) => {
     const response = await fetch(`${BASE}${pathname}`, { ...init, headers });
@@ -34,14 +50,7 @@ const check = (name, ok, detail) => {
 };
 
 try {
-    for (let i = 0; i < 60; i++) {
-        try {
-            if ((await fetch(`${BASE}/health`)).ok) break;
-        } catch {
-            /* 等启动 */
-        }
-        await new Promise((resolve) => setTimeout(resolve, 100));
-    }
+    await waitHealth();
 
     await api("/api/projects/acpproj", {
         method: "PUT",
@@ -90,6 +99,14 @@ try {
     const assistantText = transcript.filter((item) => item.role === "assistant").map((item) => item.text).join("");
     check("拿到 Agent 回复", assistantText.length > 0, assistantText.slice(0, 120));
     check("Agent 能看到 canvas MCP 工具", /mcp__solgrid_canvas|canvas_get_state|canvas_run_nodes/.test(assistantText), assistantText.slice(0, 160));
+    // 会话持久化：重启 daemon 后应恢复同一个 sessionId
+    const firstSessionId = started.json?.sessionId;
+    daemon.kill();
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    daemon = spawnDaemon();
+    await waitHealth();
+    const restarted = await api("/api/agent/start", { method: "POST", body: JSON.stringify({ projectId: "acpproj" }) });
+    check("重启 daemon 后恢复同一会话", restarted.json?.sessionId === firstSessionId, `first=${firstSessionId} restarted=${restarted.json?.sessionId}`);
 } catch (error) {
     console.error("冒烟测试异常:", error);
     failed++;
