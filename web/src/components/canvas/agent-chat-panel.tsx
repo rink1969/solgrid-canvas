@@ -116,6 +116,27 @@ export function AgentChatPanel({ projectId }: { projectId: string }) {
         return () => window.removeEventListener("canvas:agent", handler);
     }, [projectId]);
 
+    // 轮询兜底：SSE 丢失或重连时，打开面板期间定期对齐 daemon 的 transcript / running 状态
+    useEffect(() => {
+        if (!open) return;
+        let alive = true;
+        const timer = setInterval(async () => {
+            try {
+                const [transcript, status] = await Promise.all([getAgentTranscript(projectId), getAgentStatus()]);
+                if (!alive) return;
+                setItems(transcript.transcript);
+                const session = status.sessions.find((item) => item.projectId === projectId);
+                setRunning(Boolean(session?.running));
+            } catch {
+                /* daemon 未就绪时忽略 */
+            }
+        }, 2500);
+        return () => {
+            alive = false;
+            clearInterval(timer);
+        };
+    }, [open, projectId]);
+
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ block: "end" });
     }, [items.length, open]);

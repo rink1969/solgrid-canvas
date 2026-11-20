@@ -202,6 +202,15 @@ function handleEvent(event: DaemonEvent) {
         void alignWithDaemon();
         return;
     }
+    // Agent 流式事件与审批请求走 window 事件，交给对应的面板组件消费
+    if (event.type === "agent.event") {
+        window.dispatchEvent(new CustomEvent("canvas:agent", { detail: event }));
+        return;
+    }
+    if (event.type === "approval.requested" || event.type === "approval.decided") {
+        window.dispatchEvent(new CustomEvent("canvas:approval", { detail: event }));
+        return;
+    }
     if ((event.type === "project.updated" || event.type === "project.ops") && event.id) scheduleRefresh(event.id);
     if (event.type === "project.deleted" && event.id) removeLocalProject(event.id);
 }

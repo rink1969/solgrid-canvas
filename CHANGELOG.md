@@ -36,6 +36,7 @@
 + [新增] 产物布点引擎：图片一列、文本一列，从锚点右侧自动排布并避让已有节点，Agent 不需要自己算坐标。
 + [新增] 生成审批：Agent 发起生成时画布弹出确认框，用户点「允许本次生成」才会入队；拒绝或超时不产生费用。
 + [新增] `solgrid-canvas` CLI：`daemon` / `mcp` / `doctor` / `install --agent codex|claude|dsh`，安装时注册 MCP 并安装技能包；DSH 会直接写入 profile 的 `cordis.patch.yml`（自动备份）而不是只打印 JSON。
++ [修复] Agent 对话框没反应：SSE 的 `agent.event` 没有派发到面板（此前补丁锚点未命中），现在 Agent 流式消息、审批请求都能实时到达；面板另加 2.5s 轮询兜底。
 + [修复] MCP 导入路径白名单：`canvas_import_local` / `canvas_place_artifacts` 只允许项目目录、inbox 与 `CANVAS_IMPORT_ROOTS`，拒绝 `~/.ssh` 等敏感目录。
 + [修复] 画布写入冲突不再整份 PUT 覆盖：op 带 rev，409 时把本地 op 重放到最新文档（字段级 patch），多次冲突才采纳服务端。
 + [新增] ACP 会话持久化：sessionId 写入项目目录 `agent-session.json`，daemon 重启后自动 `session/resume` 接上上下文。
