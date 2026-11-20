@@ -9,10 +9,7 @@ import { useImageEditorViewport } from "@/components/canvas/use-image-editor-vie
 
 export type CanvasImageMaskEditPayload = {
     prompt: string;
-    /** 原图 + 蓝色高亮，用于画布展示和旧逻辑 */
     maskDataUrl: string;
-    /** 纯白色 / 透明区域，给局部重绘做裁剪和羽化回贴 */
-    selectionMaskDataUrl: string;
     generate: boolean;
 };
 
@@ -213,7 +210,7 @@ export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: 
         if (!nextPrompt) return setError(t("canvas.editors.maskPromptRequired"));
         if (!canvas || !element) return;
         if (!canvasHasPaint(canvas)) return setError(t("canvas.editors.maskRequired"));
-        onConfirm({ prompt: nextPrompt, maskDataUrl: buildMaskOverlay(element, canvas), selectionMaskDataUrl: buildSelectionMask(canvas), generate });
+        onConfirm({ prompt: nextPrompt, maskDataUrl: buildMaskOverlay(element, canvas), generate });
     };
 
     return (
@@ -417,25 +414,6 @@ function canvasHasPaint(canvas: HTMLCanvasElement) {
         if (data[index] > 0) return true;
     }
     return false;
-}
-
-// 导出纯蒙版：涂抹处为白色不透明，其余透明；用于 bbox 计算与羽化回贴
-function buildSelectionMask(selectionCanvas: HTMLCanvasElement) {
-    const source = selectionCanvas.getContext("2d")?.getImageData(0, 0, selectionCanvas.width, selectionCanvas.height);
-    if (!source) return selectionCanvas.toDataURL("image/png");
-    const data = source.data;
-    for (let index = 0; index < data.length; index += 4) {
-        const painted = data[index + 3] > 8;
-        data[index] = 255;
-        data[index + 1] = 255;
-        data[index + 2] = 255;
-        data[index + 3] = painted ? 255 : 0;
-    }
-    const canvas = document.createElement("canvas");
-    canvas.width = selectionCanvas.width;
-    canvas.height = selectionCanvas.height;
-    canvas.getContext("2d")?.putImageData(source, 0, 0);
-    return canvas.toDataURL("image/png");
 }
 
 function buildMaskOverlay(image: HTMLImageElement, selectionCanvas: HTMLCanvasElement) {
