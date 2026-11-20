@@ -1,8 +1,8 @@
-import { useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 
-import { LocalAgentPanel } from "./local-agent-panel";
+import { AcpAgentPanel } from "./acp-agent-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { CANVAS_AGENT_PANEL_MOTION_MS, useAgentStore } from "@/stores/use-agent-store";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -11,10 +11,12 @@ const PANEL_MOTION_SECONDS = CANVAS_AGENT_PANEL_MOTION_MS / 1000;
 
 export function AgentPanel() {
     const { t } = useTranslation();
+    useEffect(() => {
+        useAgentStore.getState().setAgentState({ panelMounted: true });
+    }, []);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const width = useAgentStore((state) => state.width);
     const [resizing, setResizing] = useState(false);
-    const panelMounted = useAgentStore((state) => state.panelMounted);
     const panelOpen = useAgentStore((state) => state.panelOpen);
     const panelClosing = useAgentStore((state) => state.panelClosing);
     const setAgentState = useAgentStore((state) => state.setAgentState);
@@ -38,8 +40,6 @@ export function AgentPanel() {
         window.addEventListener("pointerup", onUp);
     };
 
-    if (!panelMounted) return null;
-
     return (
         <motion.div
             className="relative z-[70] flex h-full shrink-0"
@@ -57,7 +57,7 @@ export function AgentPanel() {
                 style={{ width, background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
             >
                 <button type="button" className="absolute inset-y-0 left-0 z-40 w-4 -translate-x-1/2 cursor-col-resize" onPointerDown={startResize} aria-label={t("agent.panel.resize")} />
-                <LocalAgentPanel embedded />
+                <AcpAgentPanel />
             </motion.aside>
         </motion.div>
     );

@@ -47,7 +47,6 @@ import { CanvasSidePanel } from "@/components/canvas/canvas-side-panel";
 import { CanvasZoomControls } from "@/components/canvas/canvas-zoom-controls";
 import { RunHistoryLauncher } from "@/components/canvas/run-history-launcher";
 import { ApprovalCenter } from "@/components/canvas/approval-center";
-import { AgentChatPanel } from "@/components/canvas/agent-chat-panel";
 import { useAgentStore } from "@/stores/use-agent-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useAgentBridge } from "@/pages/canvas/hooks/use-agent-bridge";
@@ -3766,7 +3765,6 @@ function InfiniteCanvasPage() {
 
                 <ApprovalCenter projectId={projectId} />
 
-                <AgentChatPanel projectId={projectId} />
 
                 <CanvasZoomControls scale={viewport.k} onScaleChange={setZoomScale} onReset={resetViewport} isMiniMapOpen={isMiniMapOpen} onToggleMiniMap={() => setIsMiniMapOpen((value) => !value)} />
 
