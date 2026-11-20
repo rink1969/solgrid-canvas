@@ -6,7 +6,8 @@ import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
 
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
-import { cancelRun, createRun, listRuns, waitRun } from "@/services/api/solgrid";
+import { cancelRun, createRun, listCatalog, listRuns, waitRun } from "@/services/api/solgrid";
+import { estimateSpark, findToolPrice } from "@/lib/canvas/solgrid-cost";
 import { daemonApi } from "@/services/api/daemon";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { createVideoGenerationTask, isVideoTaskFailed, storeGeneratedVideo, waitForVideoGenerationTask } from "@/services/api/video";
@@ -2520,10 +2521,39 @@ function InfiniteCanvasPage() {
                     audioFormat: sourceNode.metadata?.audioFormat,
                     audioSpeed: sourceNode.metadata?.audioSpeed,
                 };
+                // 生成前成本预估：catalog 里带 price.rates，按参考图/输出数/时长估算
+                const referenceCount = Array.isArray(params.references) ? params.references.length : 0;
+                const outputCount = mode === "image" ? Math.max(1, Number(params.count) || 1) : 1;
+                const seconds = mode === "video" ? Number(params.seconds) || 0 : 0;
+                const resolution = typeof params.resolution === "string" ? params.resolution : undefined;
+                const catalog = await listCatalog().catch(() => null);
+                const price = findToolPrice(catalog, provider, endpoint);
+                const estimated = estimateSpark(price, { outputs: outputCount, references: referenceCount, seconds, resolution });
                 const confirmed = await new Promise<boolean>((resolve) => {
                     Modal.confirm({
                         title: mode === "video" ? "确认生成视频" : mode === "audio" ? "确认生成音频" : "确认生成图片",
-                        content: `${provider} · ${endpoint}\n费用以 solgrid 平台实际计费为准。`,
+                        content: (
+                            <div className="space-y-1 text-sm">
+                                <div className="font-mono text-xs opacity-70">
+                                    {provider} · {endpoint}
+                                </div>
+                                <div className="opacity-70">
+                                    {mode === "image"
+                                        ? `参考图 ${referenceCount} 张 · 输出 ${outputCount} 张`
+                                        : mode === "video"
+                                          ? `时长 ${seconds || 5}s · ${resolution || "默认分辨率"}`
+                                          : "音频生成"}
+                                </div>
+                                {typeof estimated === "number" ? (
+                                    <div>
+                                        预计费用：约 <strong>{estimated}</strong> Spark
+                                    </div>
+                                ) : (
+                                    <div>费用以 solgrid 平台实际计费为准。</div>
+                                )}
+                                <div className="text-xs opacity-50">实际扣费以平台结算为准</div>
+                            </div>
+                        ),
                         okText: "生成",
                         cancelText: "取消",
                         onOk: () => resolve(true),
