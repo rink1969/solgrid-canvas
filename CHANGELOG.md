@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.1.0 - 2026-11-20
+
++ [新增] 首个发布版本：本地画布 + solgrid 生成（图片/视频/音频）+ 成本预估 + 蒙版局部重绘 + 视频片段重生成 + MCP/ACP 双向 Agent 集成 + 生产模式托管。
+
 + [新增] 新增本地 daemon（零运行时依赖，仅用 Node 内置模块）：画布项目以目录形式落盘，`canvas.json` 采用 JSON Canvas 1.0，节点与连线可被 Agent 和 Obsidian 直接读写；提供项目读写接口与 SSE 变更广播。
 + [调整] 画布项目不再保存在浏览器 localforage，改为由 daemon 托管并双向同步，浏览器只保留内存镜像。
 + [调整] 画布文档写入时剔除 dataURL 与 blob URL，节点只保留 assetId / storageKey；资产层接入前暂不支持内联图片。
