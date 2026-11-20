@@ -48,4 +48,4 @@ node bin/solgrid-canvas.mjs doctor
 ## 发布包
 
 - 文件名：`solgrid-canvas-0.1.0.zip`（含构建好的前端，解压后可直接 `npm start`）
-- SHA256：`12da156a79bcb37461a1b8dfb0773c222149ea7ace7c7cb871165568d767f8e5`（构建于 Windows；跨平台可直接复用静态产物）
+- SHA256：见发布页附件说明（构建于 Windows；静态产物可跨平台复用）

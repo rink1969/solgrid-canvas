@@ -64,7 +64,10 @@ npm run dev         # 终端 2，http://localhost:3000
 npm run daemon                              # 先起 daemon
 node bin/solgrid-canvas.mjs install --agent codex   # 或 claude / dsh
 node bin/solgrid-canvas.mjs doctor          # 检查环境
-node bin/solgrid-canvas.mjs sync-config     # 把桌面版的 provider/默认模型同步给 ACP 会话
+# DSH 用户按当前 profile 安装（desktop / web / ...）
+node bin/solgrid-canvas.mjs install --agent dsh --profile <profile>
+# 把该 profile 的 provider/默认模型同步给画布使用的 ACP profile
+node bin/solgrid-canvas.mjs sync-config --from <profile> --profile acp
 ```
 
 画布右下角还有「Agent」入口：在画布内直接和本地 Agent 对话（ACP），它同样带着画布工具，可以边聊边改。

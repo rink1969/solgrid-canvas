@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## Unreleased
+
++ [修复] DSH 集成不再假设桌面版：`install --agent dsh` 会按 `DSH_PROFILE` 探测当前 profile（或 `--profile` 显式指定），`sync-config --from` 默认同样探测；画布 ACP 支持 PATH 里的 `dsh` CLI 与 DSH 内部启动环境。
+
 ## 0.1.0 - 2026-11-20
 
 + [新增] 首个发布版本：本地画布 + solgrid 生成（图片/视频/音频）+ 成本预估 + 蒙版局部重绘 + 视频片段重生成 + MCP/ACP 双向 Agent 集成 + 生产模式托管。

@@ -70,9 +70,39 @@ function installSkill() {
     return target;
 }
 
+const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
+
+function listDshProfiles() {
+    const dir = path.join(DSH_HOME, "profiles");
+    try {
+        return fs
+            .readdirSync(dir, { withFileTypes: true })
+            .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(dir, entry.name, "package.json")))
+            .map((entry) => entry.name);
+    } catch {
+        return [];
+    }
+}
+
+// 判断当前跑安装的是哪个 DSH profile：显式参数 > 环境变量 > 只有一个 profile 时自动选
+function detectDshProfile(explicit) {
+    const profiles = listDshProfiles();
+    const candidate = explicit || process.env.DSH_PROFILE || "";
+    if (candidate) {
+        const patchFile = path.join(DSH_HOME, "profiles", candidate, "cordis.patch.yml");
+        if (fs.existsSync(patchFile)) return { name: candidate, profiles };
+        return { error: `profile「${candidate}」不存在：${patchFile}\n可用：${profiles.join(", ") || "（无）"}`, profiles };
+    }
+    if (profiles.length === 1) return { name: profiles[0], profiles };
+    if (!profiles.length) return { error: `没有找到 DSH profile：${path.join(DSH_HOME, "profiles")}`, profiles };
+    return { error: `检测到多个 DSH profile（${profiles.join(", ")}），请用 --profile 指定当前 Agent 使用的那个`, profiles };
+}
+
 // DSH 的 MCP 由内置 mcp-manager 管理：写 profile 的 cordis.patch.yml 才会生效
-function installDsh() {
-    const profileDir = path.join(os.homedir(), ".dsh", "profiles", process.env.DSH_PROFILE || "desktop");
+function installDsh(explicitProfile) {
+    const detected = detectDshProfile(explicitProfile);
+    if (detected.error) return { ok: false, message: detected.error };
+    const profileDir = path.join(DSH_HOME, "profiles", detected.name);
     const patchFile = path.join(profileDir, "cordis.patch.yml");
     if (!fs.existsSync(patchFile)) return { ok: false, message: `找不到 DSH 配置：${patchFile}（确认 DSH 已安装/启动过）` };
 
@@ -95,10 +125,10 @@ function installDsh() {
     fs.copyFileSync(patchFile, backup);
     const next = `${current.trimEnd()}\n${block}`;
     fs.writeFileSync(patchFile, next);
-    return { ok: true, message: `已写入 DSH 配置：${patchFile}（备份：${path.basename(backup)}），重启 DSH 后生效`, changed: true };
+    return { ok: true, message: `已写入 DSH 配置：${patchFile}（profile=${detected.name}，备份：${path.basename(backup)}），重启 DSH 后生效`, changed: true, profile: detected.name };
 }
 
-function installAgent(agent) {
+function installAgent(agent, options = {}) {
     if (agent === "codex") {
         log("注册 Codex MCP…");
         run("codex", ["mcp", "add", "solgrid-canvas", "--", process.execPath, MCP, ...mcpCommand]);
@@ -106,7 +136,7 @@ function installAgent(agent) {
         log("注册 Claude Code MCP…");
         run("claude", ["mcp", "add", "--scope", "user", "solgrid-canvas", "--", process.execPath, MCP, ...mcpCommand]);
     } else if (agent === "dsh") {
-        const result = installDsh();
+        const result = installDsh(options.profile);
         log(result.ok ? `✓ ${result.message}` : `✗ ${result.message}`);
         if (!result.ok) return 1;
     } else {
@@ -124,7 +154,6 @@ function installAgent(agent) {
 
 
 // ---- profile 配置同步（A 方案）：desktop 的 provider/默认模型 → ACP profile ----
-const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
 
 function patchFile(profile) {
     return path.join(DSH_HOME, "profiles", profile, "cordis.patch.yml");
@@ -341,9 +370,19 @@ async function main() {
             const index = rest.indexOf(name);
             return index >= 0 ? rest[index + 1] : fallback;
         };
+        const detected = detectDshProfile(readFlag("--from", ""));
+        if (detected.error) {
+            log(`✗ ${detected.error}`);
+            return process.exit(1);
+        }
+        const targetProfile = readFlag("--profile", "acp");
+        if (detected.name === targetProfile) {
+            log(`✗ 源 profile 和目标 profile 相同（${targetProfile}），请用 --from 指定要复制配置的 profile`);
+            return process.exit(1);
+        }
         const result = syncConfig({
-            from: readFlag("--from", "desktop"),
-            target: readFlag("--profile", "acp"),
+            from: detected.name,
+            target: targetProfile,
             dryRun: rest.includes("--dry-run"),
         });
         if (!result.ok) log(`✗ ${result.message}`);
@@ -352,18 +391,21 @@ async function main() {
     if (command === "install") {
         const index = rest.indexOf("--agent");
         const agent = index >= 0 ? rest[index + 1] : "";
-        return process.exit(installAgent(agent));
+        const profileIndex = rest.indexOf("--profile");
+        const profile = profileIndex >= 0 ? rest[profileIndex + 1] : "";
+        return process.exit(installAgent(agent, { profile }));
     }
     log(`solgrid-canvas
 
 用法：
   solgrid-canvas daemon                    启动本地 daemon
   solgrid-canvas mcp                       以 stdio MCP server 运行（给 Agent 配）
-  solgrid-canvas install --agent codex|claude|dsh   注册 MCP 并安装技能包
+  solgrid-canvas install --agent codex|claude|dsh [--profile <name>]
+                                           注册 MCP 并安装技能包（DSH 可指定 profile）
   solgrid-canvas doctor                    检查 Node / solgrid CLI / daemon / ffmpeg
   solgrid-canvas setup                     安装依赖 + 构建前端 + 启动 daemon + 写开发环境变量
-  solgrid-canvas sync-config [--from desktop] [--profile acp] [--dry-run]
-                                           把 desktop 的 provider/默认模型同步到 ACP profile
+  solgrid-canvas sync-config [--from <profile>] [--profile acp] [--dry-run]
+                                           把指定 profile 的 provider/默认模型同步到 ACP profile（默认自动探测）
 `);
 }
 

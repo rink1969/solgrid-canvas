@@ -123,7 +123,7 @@ node bin/solgrid-canvas.mjs setup
 |---|---|---|
 | Claude Code | `claude --version` 可用 | `node bin/solgrid-canvas.mjs install --agent claude` |
 | Codex CLI | `codex --version` 可用 | `node bin/solgrid-canvas.mjs install --agent codex` |
-| DeepSeek Harness（DSH 桌面版） | 运行目录下有 `DeepSeek Harness.exe`（Windows） | `node bin/solgrid-canvas.mjs install --agent dsh` |
+| DeepSeek Harness（DSH） | 环境变量 `DSH_PROFILE` 存在，或 `~/.dsh/profiles/` 有内容 | `node bin/solgrid-canvas.mjs install --agent dsh --profile <你的 profile>` |
 | 其他 MCP 客户端 | 在设置里手写 JSON | 见下方通用配置 |
 
 注册后**重启你自己**（或新开会话），使 MCP 工具生效。工具名前缀为 `mcp__solgrid_canvas__canvas_*`。
@@ -143,17 +143,45 @@ node bin/solgrid-canvas.mjs setup
 
 > Windows 下路径用 `\\` 转义；`command` 必须是绝对路径，避免 Agent 进程 PATH 不完整。
 
-### DSH 额外步骤
+### DSH 额外步骤（先确认你用的是哪个 profile）
 
-`install --agent dsh` 会写入 `~/.dsh/profiles/desktop/cordis.patch.yml`（自动备份）并安装技能包到 `~/.agents/skills/solgrid-canvas/`。
+DSH 可以是桌面版（`desktop` profile），也可以是用 `dsh web` / `dsh tui` / `dsh headless` 启动的其他 profile。**MCP 必须写进你正在使用的那个 profile**，否则工具不会出现。
 
-如果桌面版改过模型/渠道，建议同步给 ACP 会话：
+在 DSH 的 Agent 终端里探测：
 
 ```bash
-node bin/solgrid-canvas.mjs sync-config
+# bash
+echo "$DSH_PROFILE"
+echo "$DSH_PROFILE_DIR"
+
+# PowerShell
+$env:DSH_PROFILE
+$env:DSH_PROFILE_DIR
+```
+
+如果环境变量为空（例如你在 DSH 外部终端操作），列出已有 profile 并让用户确认：
+
+```bash
+ls ~/.dsh/profiles        # Windows: dir %USERPROFILE%\.dsh\profiles
+```
+
+然后执行（把 `<profile>` 换成探测到的名字，例如 `desktop` 或 `web`）：
+
+```bash
+node bin/solgrid-canvas.mjs install --agent dsh --profile <profile>
+```
+
+该命令会写入 `~/.dsh/profiles/<profile>/cordis.patch.yml`（自动备份），并安装技能包到 `~/.agents/skills/solgrid-canvas/`。
+
+如果这个 profile 改过模型/渠道，同步给画布用的 ACP profile：
+
+```bash
+node bin/solgrid-canvas.mjs sync-config --from <profile> --profile acp
 ```
 
 重启 DSH 后，会话里应能看到 `mcp__solgrid_canvas__*` 工具。
+
+> `install --agent dsh` 不带 `--profile` 时：优先用 `DSH_PROFILE`；只有一个 profile 时自动选；有多个且无法判断时会报错并列出可用值。
 
 ---
 
@@ -161,7 +189,12 @@ node bin/solgrid-canvas.mjs sync-config
 
 画布右侧的「Agent」面板通过 ACP 调用本地 Agent。
 
-- **DSH**：默认自动发现并启动（`dsh --profile acp`，Electron node 模式跑 app.asar 内的 CLI），无需额外配置。
+- **DSH**：daemon 会自动选择启动方式：
+  1. PATH 里的 `dsh` CLI（`dsh --profile acp`，适合 `dsh web` / npm 安装的用户）
+  2. 当前进程环境里的 DSH 可执行文件（从 DSH 内部启动 daemon 时）
+  3. DSH 桌面版默认安装路径（Electron node 模式）
+
+  都不匹配时可用 `CANVAS_DSH_EXE` 指定桌面版可执行文件。
 - **其他 Agent**：需要对应的 ACP 适配器，通过环境变量指定（启动 daemon 前设置）：
   ```bash
   # 示例（以实际安装的适配器为准）
@@ -203,7 +236,7 @@ Agent 完成后请逐项确认并汇报：
 | `health` 连不上 | daemon 没启动或端口被占；`npm run daemon` 看日志；端口可用 `CANVAS_PORT` 覆盖 |
 | 浏览器打开 401 / API 全 401 | 生产模式：先访问 `/`（会下发 HttpOnly cookie）；开发模式：检查 `web/.env.local` 里的 `CANVAS_TOKEN` 是否与 `~/.solgrid-canvas/daemon.json` 一致 |
 | 打开页面提示「前端还没构建」 | 在仓库根目录执行 `npm run build` |
-| MCP 工具不出现 | 注册后没重启 Agent；检查配置里的 node 绝对路径与 `mcp.mjs` 路径；手动运行 `node daemon/mcp.mjs` 应等待 stdin 不报错 |
+| MCP 工具不出现 | 注册后没重启 Agent；DSH 用户先确认写进了**当前使用的 profile**（`install --agent dsh --profile <name>`）；再检查配置里的 node 绝对路径与 `mcp.mjs` 路径 |
 | 生成报 `solgrid_unavailable` / 未登录 | 让用户在其终端登录 solgrid；`solgrid --version` 只能证明已安装 |
 | 生成报「没有默认模型」 | 设置 → 渠道里选默认生图/生视频模型；或在节点上单独选模型 |
 | 视频片段重生成失败 | 检查 `ffmpeg`/`ffprobe` 是否在 PATH；`doctor` 有对应项 |
