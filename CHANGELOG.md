@@ -36,6 +36,7 @@
 + [新增] 产物布点引擎：图片一列、文本一列，从锚点右侧自动排布并避让已有节点，Agent 不需要自己算坐标。
 + [新增] 生成审批：Agent 发起生成时画布弹出确认框，用户点「允许本次生成」才会入队；拒绝或超时不产生费用。
 + [新增] `solgrid-canvas` CLI：`daemon` / `mcp` / `doctor` / `install --agent codex|claude|dsh`，安装时注册 MCP 并安装技能包；DSH 会直接写入 profile 的 `cordis.patch.yml`（自动备份）而不是只打印 JSON。
++ [调整] 清理旧 Agent 代码：删除本地 canvas-agent 面板/连接/日志/历史/技能视图、canvas-agent 协议客户端、技能 store、站点工具、agent-url 引导与画布 ops 桥接；Agent 面板只保留 ACP 链路。
 + [新增] 生成前成本预估：确认框显示参考图/输出数量、视频时长与分辨率，并按 catalog 的 price.rates 估算 Spark（如 4.29 / 65），实际以平台结算为准。
 + [修复] 入队时把 data URL 参考图落成项目资产再脱敏入库，避免参考图被日志脱敏替换成占位符（smoke-runs 覆盖）。
 + [调整] 回退"裁剪+回贴"的局部重绘实验（拼接感明显），恢复原蒙版编辑：整图 + 蓝色蒙版作为参考，模型输出整图。裁剪/羽化实现保留在 git 历史（5b43bca）备查。

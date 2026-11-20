@@ -1,9 +1,7 @@
-import { isSiteTool, SITE_TOOL_LABELS } from "@/lib/agent/agent-site-tools";
 import i18n from "@/i18n";
 import { summarizeCanvasAgentOps, type CanvasAgentOp } from "@/lib/canvas/canvas-agent-ops";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { randomId } from "@/lib/utils";
-import { resolveAgentMessageAssetUrl } from "@/services/api/canvas-agent";
 import { useAgentStore, type AgentAttachment, type AgentChatItem, type AgentEventLog, type AgentMessageAttachment, type AgentTokenUsage } from "@/stores/use-agent-store";
 import type { AgentChatAttachment } from "./agent-chat-message";
 export const REASONING_PLACEHOLDER = i18n.t("agent.events.analyzing");
@@ -62,7 +60,7 @@ export function agentMessageToChatMessage(item: AgentChatItem, endpoint: string,
 }
 
 export function agentAttachmentToChatAttachment(item: AgentMessageAttachment, endpoint: string, token: string): AgentChatAttachment {
-    return { id: item.id, name: item.name, url: resolveAgentMessageAssetUrl(endpoint, token, item.dataUrl || item.url) };
+    return { id: item.id, name: item.name, url: item.dataUrl || item.url };
 }
 
 export function formatAgentEvent(event: AgentEventPayload): Omit<AgentChatItem, "id"> | null {
@@ -323,7 +321,6 @@ export function toolName(name: string) {
     if (name === "apply_patch" || name.endsWith("__apply_patch")) return tr("tools.editFiles");
     if (name === "web__run" || name.endsWith("__web__run")) return tr("tools.searchWeb");
     if (toolTranslationKeys[name]) return tr(`tools.${toolTranslationKeys[name]}`);
-    if (isSiteTool(name)) return SITE_TOOL_LABELS[name];
     return name ? tr("toolNamed", { name }) : tr("toolOperation");
 }
 
@@ -373,7 +370,6 @@ function toolInputRows(name: string, input: unknown) {
 export function toolSummary(item?: AgentEventItem) {
     const result = parseToolResult(item?.result);
     const name = String(item?.tool || "");
-    if (name === "site_navigate" || isSiteTool(name)) return siteToolSummary(name, result, parseToolArguments(item?.arguments));
     const nodeField = objectField(result, "nodes");
     const connectionField = objectField(result, "connections");
     const nodes = Array.isArray(nodeField) ? nodeField : [];

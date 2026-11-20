@@ -27,7 +27,7 @@ type PluginHostParams = {
     viewportRef: MutableRefObject<ViewportTransform>;
     setNodes: Dispatch<SetStateAction<CanvasNodeData[]>>;
     setDialogNodeId: Dispatch<SetStateAction<string | null>>;
-    applyAgentOps: (ops?: CanvasAgentOp[]) => unknown;
+    applyAgentOps?: (ops?: CanvasAgentOp[]) => unknown;
 };
 
 /**
@@ -106,7 +106,7 @@ export function usePluginHost(params: PluginHostParams) {
                     .filter((node): node is CanvasNodeData => Boolean(node)),
             updateNode: (nodeId, patch) => setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, ...patch } : node))),
             updateMetadata: (nodeId, patch) => setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, ...patch } } : node))),
-            applyOps: (ops) => applyAgentOps(ops),
+            applyOps: (ops) => applyAgentOps?.(ops),
             ai: pluginAi,
             openPanel: (nodeId) => setDialogNodeId(nodeId),
             closePanel: () => setDialogNodeId(null),

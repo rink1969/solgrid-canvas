@@ -8,7 +8,6 @@ import i18n from "@/i18n";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useAgentStore, type AgentCanvasReference, type AgentPendingApproval, type AgentSkillReference } from "@/stores/use-agent-store";
-import { resolveAgentMessageAssetUrl, revealAgentLocalFile } from "@/services/api/canvas-agent";
 import { AgentCanvasReferencePreview, canvasReferenceIcon, canvasReferenceKindLabel } from "./agent-canvas-reference-preview";
 import { agentInlineTokenClass, agentInlineTokenIconClass, agentInlineTokenMediaClass, agentReferenceMarker, parseAgentInlineTokens } from "./agent-chat-inline-tokens";
 
@@ -25,36 +24,17 @@ const streamdownAnimation = { duration: 20, stagger: 0, sep: "word" } as const;
 
 function AgentLinkModal({ isOpen, onClose, onConfirm, url }: LinkSafetyModalProps) {
     const { t } = useTranslation();
-    const { message } = App.useApp();
     const copyText = useCopyText();
-    const localPath = localFilePath(url);
-    const [opening, setOpening] = useState(false);
-    const open = async () => {
-        if (!localPath) return onConfirm();
-        const { url: endpoint, token } = useAgentStore.getState();
-        setOpening(true);
-        try {
-            await revealAgentLocalFile(endpoint, token, localPath);
-            message.success(t("agent.message.revealed"));
-            onClose();
-        } catch (error) {
-            message.error(error instanceof Error ? error.message : t("agent.message.openLocalFailed"));
-        } finally {
-            setOpening(false);
-        }
-    };
     return (
-        <Modal open={isOpen} onCancel={onClose} footer={null} centered width={420} title={t(localPath ? "agent.message.openLocal" : "agent.message.openExternal")}>
-            <div className="text-sm text-black/55 dark:text-white/55">
-                {t(localPath ? "agent.message.localDescription" : "agent.message.externalDescription")}
-            </div>
-            <div className="mt-4 max-h-32 overflow-auto break-all rounded-lg bg-black/[.035] px-3 py-2.5 font-mono text-xs leading-5 dark:bg-white/[.06]">{localPath || url}</div>
+        <Modal open={isOpen} onCancel={onClose} footer={null} centered width={420} title={t("agent.message.openExternal")}>
+            <div className="text-sm text-black/55 dark:text-white/55">{t("agent.message.externalDescription")}</div>
+            <div className="mt-4 max-h-32 overflow-auto break-all rounded-lg bg-black/[.035] px-3 py-2.5 font-mono text-xs leading-5 dark:bg-white/[.06]">{url}</div>
             <div className="mt-5 flex justify-end gap-2">
-                <Button type="text" icon={<Copy className="size-4" />} onClick={() => copyText(localPath || url, t(localPath ? "agent.message.pathCopied" : "agent.message.linkCopied"))}>
-                    {t(localPath ? "agent.message.copyPath" : "agent.message.copyLink")}
+                <Button type="text" icon={<Copy className="size-4" />} onClick={() => copyText(url, t("agent.message.linkCopied"))}>
+                    {t("agent.message.copyLink")}
                 </Button>
-                <Button type="text" loading={opening} icon={localPath ? <FolderOpen className="size-4" /> : <ExternalLink className="size-4" />} onClick={open}>
-                    {t(localPath ? "agent.message.showInFolder" : "agent.message.continueOpen")}
+                <Button type="text" icon={<ExternalLink className="size-4" />} onClick={onConfirm}>
+                    {t("agent.message.continueOpen")}
                 </Button>
             </div>
         </Modal>
@@ -159,7 +139,7 @@ function AgentCanvasMention({ reference, theme }: { reference: AgentCanvasRefere
     const node = useAgentStore((state) => state.canvasContext?.snapshot.nodes.find((item) => item.id === reference.nodeId));
     const endpoint = useAgentStore((state) => state.url);
     const token = useAgentStore((state) => state.token);
-    const previewUrl = resolveAgentMessageAssetUrl(endpoint, token, reference.previewUrl || node?.metadata?.content || "");
+    const previewUrl = reference.previewUrl || node?.metadata?.content || "";
     const previewText = reference.text || node?.metadata?.content || node?.metadata?.prompt;
     const Icon = canvasReferenceIcon(reference.kind);
     return (
