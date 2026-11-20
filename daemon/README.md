@@ -83,6 +83,19 @@ node bin/solgrid-canvas.mjs install --agent codex|claude|dsh
 
 注册的是 stdio MCP：`node daemon/mcp.mjs`。它不重复实现业务，全部转发给 daemon；daemon 没起时会自动拉起。工具包括 `canvas_get_state` / `canvas_apply_ops` / `canvas_place_artifacts` / `canvas_import_local` / `canvas_run_nodes` / `canvas_watch_run` / `canvas_cancel_run` 等。
 
+## 视频片段重生成
+
+```
+POST /api/video-edits   {projectId,sourceNodeId,start,end,prompt,mode:"flf"|"videoedit",resolution,replace}
+GET  /api/video-edits/:id
+POST /api/video-edits/:id/cancel
+```
+
+- `flf`：ffmpeg 抽首尾帧 → `wan2.7-i2v`（duration=片段秒数）→ 拼接
+- `videoedit`：ffmpeg 裁片段（带 0.3s 把手）→ `wan2.7-videoedit` → 裁回精确区间 → 拼接
+- 拼接用原视频完整音轨；产物落 assets 后新建子节点（或替换原节点）
+- 依赖本机 `ffmpeg` / `ffprobe`；测试可用 `CANVAS_VIDEO_EDIT_FAKE=1` 跳过平台生成
+
 ## 画布 → Agent（ACP）
 
 ```bash

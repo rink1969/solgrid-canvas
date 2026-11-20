@@ -12,6 +12,7 @@ import { createCatalogCache, createOpLog, createRunStore, openDb } from "./db.mj
 import { applyOps, normalizeOps } from "./ops.mjs";
 import { createApprovalStore } from "./approvals.mjs";
 import { createAgentManager } from "./acp.mjs";
+import { createVideoEditManager } from "./video-edit.mjs";
 import { createGateway } from "./gateway.mjs";
 import { createRunEngine } from "./runs.mjs";
 
@@ -123,6 +124,7 @@ const engine = createRunEngine({
 void engine.recover();
 const approvals = createApprovalStore({ engine, broadcast, log });
 const agent = createAgentManager({ broadcast, log });
+const videoEdits = createVideoEditManager({ runStore, engine, gateway, store, projectsDir: store.projectsDir, broadcast, log });
 
 // ---- 路由 ----
 async function handle(req, res) {
@@ -238,6 +240,35 @@ async function handle(req, res) {
             if (stale) return sendJson(res, 200, { detail: stale, cached: true, warning: error.message });
             return sendJson(res, 502, { error: "solgrid_unavailable", message: error.message });
         }
+    }
+
+    // ---- 视频片段重生成 ----
+    if (pathname === "/api/video-edits" && req.method === "POST") {
+        let body;
+        try {
+            body = JSON.parse(await readBody(req));
+        } catch (error) {
+            return sendJson(res, 400, { error: "invalid_json", message: error.message });
+        }
+        try {
+            const job = videoEdits.create(body || {});
+            return sendJson(res, 200, { job: { id: job.id, status: job.status, stage: job.stage } });
+        } catch (error) {
+            return sendJson(res, 400, { error: error.code || "invalid_request", message: error.message });
+        }
+    }
+
+    const videoEditMatch = pathname.match(/^\/api\/video-edits\/([0-9a-f-]{36})$/);
+    if (videoEditMatch && req.method === "GET") {
+        const job = videoEdits.get(videoEditMatch[1]);
+        if (!job) return sendJson(res, 404, { error: "not_found" });
+        return sendJson(res, 200, { job });
+    }
+
+    const videoEditCancel = pathname.match(/^\/api\/video-edits\/([0-9a-f-]{36})\/cancel$/);
+    if (videoEditCancel && req.method === "POST") {
+        const ok = videoEdits.cancel(videoEditCancel[1]);
+        return sendJson(res, ok ? 200 : 404, { ok });
     }
 
     // ---- Agent（ACP）：画布 → 本地 Agent ----
