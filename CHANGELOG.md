@@ -2,6 +2,11 @@
 
 ## Unreleased
 
++ [修复] rawBody 契约统一：文档里是字符串，提交时统一解析为对象；daemon 兼容字符串并校验类型，非法值返回 400（不再静默走 family）。
++ [修复] 画布生成/重试/MCP 现在会把节点 rawBody 真正传给 daemon；rawBody 内的 data URL 会落成项目资产再上传。
++ [新增] 未知模型族可用「生成骨架」：`/api/tools/detail` 返回 `skeleton`，参数面板一键填入，MCP `canvas_inspect_tool` 同样可用。
+
+
 ## Unreleased
 
 + [修复] DSH 集成不再假设桌面版：`install --agent dsh` 会按 `DSH_PROFILE` 探测当前 profile（或 `--profile` 显式指定），`sync-config --from` 默认同样探测；画布 ACP 支持 PATH 里的 `dsh` CLI 与 DSH 内部启动环境。

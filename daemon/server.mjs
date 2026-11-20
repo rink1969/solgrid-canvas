@@ -13,6 +13,7 @@ import { applyOps, normalizeOps } from "./ops.mjs";
 import { createApprovalStore } from "./approvals.mjs";
 import { createAgentManager } from "./acp.mjs";
 import { createVideoEditManager } from "./video-edit.mjs";
+import { skeletonFromSchema } from "./raw-body.mjs";
 import { createGateway } from "./gateway.mjs";
 import { createRunEngine } from "./runs.mjs";
 
@@ -305,10 +306,10 @@ async function handle(req, res) {
         try {
             const detail = await gateway.inspect(provider, endpoint);
             catalog.put(key, detail);
-            return sendJson(res, 200, { detail, cached: false });
+            return sendJson(res, 200, { detail, skeleton: skeletonFromSchema(detail?.input?.body), cached: false });
         } catch (error) {
             const stale = catalog.get(key);
-            if (stale) return sendJson(res, 200, { detail: stale, cached: true, warning: error.message });
+            if (stale) return sendJson(res, 200, { detail: stale, skeleton: skeletonFromSchema(stale?.input?.body), cached: true, warning: error.message });
             return sendJson(res, 502, { error: "solgrid_unavailable", message: error.message });
         }
     }
@@ -488,9 +489,13 @@ async function handle(req, res) {
         const { projectId, nodeId, provider, endpoint } = body || {};
         if (!projectId || !provider || !endpoint) return sendJson(res, 400, { error: "missing_fields", hint: "需要 projectId / provider / endpoint" });
         // params 是画布语义（prompt/size/references…），由 daemon 按 family 转成 provider 契约；
-        // 想直接控制请求体就传 params.rawBody。
-        const run = engine.enqueue({ projectId, nodeId, provider, endpoint, body: body.params ?? body.body ?? {} });
-        return sendJson(res, 200, { run });
+        // 想直接控制请求体就传 params.rawBody（对象，或 JSON 字符串）。
+        try {
+            const run = engine.enqueue({ projectId, nodeId, provider, endpoint, body: body.params ?? body.body ?? {} });
+            return sendJson(res, 200, { run });
+        } catch (error) {
+            return sendJson(res, 400, { error: error.code || "invalid_params", message: error.message });
+        }
     }
 
     const runMatch = pathname.match(/^\/api\/runs\/([0-9a-f-]{36})$/);

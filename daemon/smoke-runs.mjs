@@ -218,6 +218,46 @@ try {
     const rawBody = readBodies().find((item) => item?.prompt === "raw body 测试");
     check("rawBody 原样作为请求体（陌生 family 也能跑）", Boolean(rawBody) && rawBody.duration === "5");
 
+    // rawBody 契约：字符串自动 parse；类型/JSON 错误明确 400；内部 data URL 落资产
+    const stringRaw = await fetch(`${BASE}/api/runs`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ projectId: "smokeproj", provider: "kling", endpoint: "/image-to-video/kling-2.6", params: { rawBody: JSON.stringify({ prompt: "string raw body", duration: "7" }) } }),
+    }).then((r) => r.json());
+    for (let i = 0; i < 40; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        const payload = await fetch(`${BASE}/api/runs/${stringRaw.run.id}`, { headers }).then((r) => r.json());
+        if (["completed", "failed", "uncertain", "stopped"].includes(payload.run?.status)) break;
+    }
+    const stringBody = readBodies().find((item) => item?.prompt === "string raw body");
+    check("rawBody 字符串自动 parse", Boolean(stringBody) && stringBody.duration === "7", JSON.stringify(stringBody).slice(0, 200));
+
+    const invalidRaw = await fetch(`${BASE}/api/runs`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ projectId: "smokeproj", provider: "kling", endpoint: "/image-to-video/kling-2.6", params: { rawBody: "{not json" } }),
+    });
+    check("非法 rawBody 返回 400", invalidRaw.status === 400, String(invalidRaw.status));
+    const numberRaw = await fetch(`${BASE}/api/runs`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ projectId: "smokeproj", provider: "kling", endpoint: "/image-to-video/kling-2.6", params: { rawBody: 42 } }),
+    });
+    check("非对象 rawBody 返回 400", numberRaw.status === 400, String(numberRaw.status));
+
+    const dataRaw = await fetch(`${BASE}/api/runs`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ projectId: "smokeproj", provider: "kling", endpoint: "/image-to-video/kling-2.6", params: { rawBody: { prompt: "raw data body", image: `data:image/png;base64,${tinyPng}` } } }),
+    }).then((r) => r.json());
+    for (let i = 0; i < 40; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        const payload = await fetch(`${BASE}/api/runs/${dataRaw.run.id}`, { headers }).then((r) => r.json());
+        if (["completed", "failed", "uncertain", "stopped"].includes(payload.run?.status)) break;
+    }
+    const dataBody = readBodies().find((item) => item?.prompt === "raw data body");
+    check("rawBody 内 data URL 落资产并上传", typeof dataBody?.image === "string" && dataBody.image.startsWith("https://fake.local/"), JSON.stringify(dataBody).slice(0, 200));
+
     // 运行详情/摘要/重试/删除
     const runDetail = await fetch(`${BASE}/api/runs/${run.id}`, { headers }).then((r) => r.json());
     check("详情带实际请求体", runDetail.run?.builtBody?.input?.messages?.[0]?.content?.[0]?.text === "a cat", JSON.stringify(runDetail.run?.builtBody).slice(0, 200));

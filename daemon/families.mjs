@@ -151,7 +151,7 @@ export function buildBody({ provider, endpoint, params, mediaUrls }) {
     if (params?.rawBody && typeof params.rawBody === "object") return { family: "raw", body: params.rawBody };
     const family = FAMILIES.find((item) => item.match(provider, endpoint));
     if (!family) {
-        throw Object.assign(new Error(`暂不支持的模型族：${provider} ${endpoint}。请在节点里用 raw JSON 填写请求体。`), { code: "unsupported_family" });
+        throw Object.assign(new Error(`暂不支持的模型族：${provider} ${endpoint}。请在节点里用 raw JSON 填写请求体（参数面板有「生成骨架」；MCP 可用 canvas_inspect_tool 返回的 skeleton）。`), { code: "unsupported_family" });
     }
     const prompt = String(params?.prompt || "").trim();
     if (!prompt) throw Object.assign(new Error("prompt 不能为空"), { code: "missing_prompt" });

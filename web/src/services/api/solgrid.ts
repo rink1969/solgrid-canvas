@@ -39,6 +39,8 @@ export type SolgridToolDetail = {
     input?: { body?: SolgridSchema; queryParams?: SolgridSchema; pathParams?: SolgridSchema };
     price?: unknown;
     notes?: string;
+    /** 由 daemon 按 schema 生成的请求体骨架 */
+    skeleton?: unknown;
 };
 
 export type SolgridCatalog = { image: SolgridTool[]; video: SolgridTool[]; audio: SolgridTool[] };
@@ -49,8 +51,8 @@ export async function listCatalog(refresh = false): Promise<SolgridCatalog> {
 }
 
 export async function inspectTool(provider: string, endpoint: string): Promise<SolgridToolDetail> {
-    const data = await request<{ detail: SolgridToolDetail }>(`/tools/detail?provider=${encodeURIComponent(provider)}&endpoint=${encodeURIComponent(endpoint)}`);
-    return data.detail || {};
+    const data = await request<{ detail: SolgridToolDetail; skeleton?: unknown }>(`/tools/detail?provider=${encodeURIComponent(provider)}&endpoint=${encodeURIComponent(endpoint)}`);
+    return { ...(data.detail || {}), skeleton: data.skeleton };
 }
 
 export async function listTools(query: string): Promise<SolgridTool[]> {

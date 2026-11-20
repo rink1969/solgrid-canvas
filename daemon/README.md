@@ -83,6 +83,13 @@ node bin/solgrid-canvas.mjs install --agent codex|claude|dsh
 
 注册的是 stdio MCP：`node daemon/mcp.mjs`。它不重复实现业务，全部转发给 daemon；daemon 没起时会自动拉起。工具包括 `canvas_get_state` / `canvas_apply_ops` / `canvas_place_artifacts` / `canvas_import_local` / `canvas_run_nodes` / `canvas_watch_run` / `canvas_cancel_run` 等。
 
+## rawBody 契约
+
+- 画布文档里 `metadata.rawBody` 是 **JSON 字符串**（编辑器文本）；daemon 的 `params.rawBody` 是 **对象**。
+- `POST /api/runs` 接受对象或 JSON 字符串；非法 JSON / 非对象返回 400 `invalid_raw_body`。
+- rawBody 里的 `data:` URL 会落成项目资产；`asset:` 引用会经 `files upload` 转公网 URL 后再提交。
+- `GET /api/tools/detail` 额外返回 `skeleton`（按 body schema 生成），可直接改后作为 rawBody。
+
 ## 视频片段重生成
 
 ```

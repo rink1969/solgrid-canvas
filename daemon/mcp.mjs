@@ -261,7 +261,20 @@ async function getProject(projectId) {
 function collectParams(node, project) {
     const incoming = project.connections.filter((edge) => edge.toNodeId === node.id).map((edge) => project.nodes.find((item) => item.id === edge.fromNodeId)).filter(Boolean);
     const references = incoming.map((item) => item.metadata?.storageKey).filter((key) => typeof key === "string" && key.startsWith("asset:"));
+    // 文档里 rawBody 是 JSON 文本，这里解析成对象再交给 daemon；解析失败直接报给 Agent
+    let rawBody;
+    const rawText = node.metadata?.rawBody;
+    if (typeof rawText === "string" && rawText.trim()) {
+        try {
+            const parsed = JSON.parse(rawText);
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("必须是 JSON 对象");
+            rawBody = parsed;
+        } catch (error) {
+            throw new Error(`节点 rawBody 无效：${error.message}`);
+        }
+    }
     return {
+        ...(rawBody ? { rawBody } : {}),
         prompt: node.metadata?.prompt,
         references,
         size: node.metadata?.size,

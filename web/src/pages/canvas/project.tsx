@@ -8,6 +8,7 @@ import { useTranslation } from "react-i18next";
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
 import { cancelRun, createRun, listCatalog, listRuns, waitRun } from "@/services/api/solgrid";
 import { estimateSpark, findToolPrice } from "@/lib/canvas/solgrid-cost";
+import { parseRawBodyText, rawBodyEstimateInputs } from "@/lib/canvas/solgrid-raw-body";
 import { daemonApi } from "@/services/api/daemon";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { createVideoGenerationTask, isVideoTaskFailed, storeGeneratedVideo, waitForVideoGenerationTask } from "@/services/api/video";
@@ -2099,17 +2100,23 @@ function InfiniteCanvasPage() {
 
     // 图片编辑（蒙版局部修改、多角度等）统一走 solgrid：参考图用节点/蒙版资产的 storageKey
     const runSolgridImageEdit = useCallback(
-        async ({ node, prompt, references, childId, signal }: { node: CanvasNodeData; prompt: string; references: string[]; childId: string; signal: AbortSignal }) => {
+        async ({ node, prompt, references, childId, signal, useRawBody = false }: { node: CanvasNodeData; prompt: string; references: string[]; childId: string; signal: AbortSignal; useRawBody?: boolean }) => {
             const config = useConfigStore.getState().config;
             const provider = node.metadata?.provider || config.defaultImageTool?.provider;
             const endpoint = node.metadata?.endpoint || config.defaultImageTool?.endpoint;
             if (!provider || !endpoint) throw new Error("还没有默认生图模型：请到设置 → 渠道 里选一个");
+            let rawBody: Record<string, unknown> | undefined;
+            if (useRawBody) {
+                const parsed = parseRawBodyText(node.metadata?.rawBody);
+                if (parsed.error) throw new Error(parsed.error);
+                rawBody = parsed.value;
+            }
             const { run } = await createRun({
                 projectId,
                 nodeId: childId,
                 provider,
                 endpoint,
-                params: { prompt, references: references.filter(Boolean), count: 1, size: node.metadata?.size },
+                params: { prompt, references: references.filter(Boolean), count: 1, size: node.metadata?.size, ...(rawBody ? { rawBody } : {}) },
             });
             solgridRunIdsRef.current.set(childId, run.id);
             try {
@@ -2481,9 +2488,16 @@ function InfiniteCanvasPage() {
                     else if (image.dataUrl) references.push(image.dataUrl);
                     else if (image.url) references.push(image.url);
                 }
+                const rawParsed = parseRawBodyText(sourceNode.metadata?.rawBody);
+                if (rawParsed.error) {
+                    message.error(rawParsed.error);
+                    return;
+                }
+                const rawBody = rawParsed.value;
                 const params: Record<string, unknown> = {
                     prompt: context.prompt,
                     references,
+                    ...(rawBody ? { rawBody } : {}),
                     size: sourceNode.metadata?.size,
                     count: Math.max(1, Number(sourceNode.metadata?.count) || 1),
                     seconds: sourceNode.metadata?.seconds,
@@ -2496,9 +2510,10 @@ function InfiniteCanvasPage() {
                 };
                 // 生成前成本预估：catalog 里带 price.rates，按参考图/输出数/时长估算
                 const referenceCount = Array.isArray(params.references) ? params.references.length : 0;
-                const outputCount = mode === "image" ? Math.max(1, Number(params.count) || 1) : 1;
-                const seconds = mode === "video" ? Number(params.seconds) || 0 : 0;
-                const resolution = typeof params.resolution === "string" ? params.resolution : undefined;
+                const rawInputs = rawBodyEstimateInputs(rawBody);
+                const outputCount = mode === "image" ? Math.max(1, Number(rawInputs.outputs ?? params.count) || 1) : 1;
+                const seconds = mode === "video" ? Number(rawInputs.seconds ?? params.seconds) || 0 : 0;
+                const resolution = rawInputs.resolution || (typeof params.resolution === "string" ? params.resolution : undefined);
                 const catalog = await listCatalog().catch(() => null);
                 const price = findToolPrice(catalog, provider, endpoint);
                 const estimated = estimateSpark(price, { outputs: outputCount, references: referenceCount, seconds, resolution });
@@ -3126,7 +3141,7 @@ function InfiniteCanvasPage() {
                     const controller = startGenerationRequest(node.id, node.id, node.id);
                     try {
                         const references = node.metadata?.generationType === "edit" && node.metadata?.storageKey ? [node.metadata.storageKey] : [];
-                        const uploaded = await runSolgridImageEdit({ node, prompt: retryPrompt, references, childId: node.id, signal: controller.signal });
+                        const uploaded = await runSolgridImageEdit({ node, prompt: retryPrompt, references, childId: node.id, signal: controller.signal, useRawBody: true });
                         const size = fitNodeSize(uploaded.width, uploaded.height, node.width, node.height);
                         setNodes((prev) =>
                             prev.map((item) =>

@@ -3,6 +3,7 @@ import { Input, Tooltip } from "antd";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { buildRawBodySkeleton } from "@/lib/canvas/solgrid-raw-body";
 import { inspectTool, type SolgridToolDetail } from "@/services/api/solgrid";
 import type { CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
 
@@ -72,6 +73,7 @@ export function SolgridParamsEditor({ node, onChange }: { node: CanvasNodeData; 
 
     const fields = useMemo(() => describeSchema(detail), [detail]);
     const price = useMemo(() => describePrice(detail?.price), [detail]);
+    const skeleton = useMemo(() => detail?.skeleton ?? buildRawBodySkeleton(detail?.input?.body), [detail]);
 
     if (!provider || !endpoint) return null;
 
@@ -101,7 +103,25 @@ export function SolgridParamsEditor({ node, onChange }: { node: CanvasNodeData; 
                         {fields.length ? `（${fields.length} 个字段）` : ""}
                     </button>
                 </Tooltip>
-                {node.metadata?.rawBody ? <span className="opacity-60">已使用 raw JSON</span> : null}
+                <span className="flex items-center gap-2">
+                    {skeleton ? (
+                        <button
+                            type="button"
+                            className="rounded border px-1.5 py-0.5 opacity-80 hover:opacity-100"
+                            style={{ borderColor: theme.toolbar.border }}
+                            onClick={() => {
+                                const text = JSON.stringify(skeleton, null, 2);
+                                setText(text);
+                                onChange({ rawBody: text });
+                                setError("");
+                                setOpen(true);
+                            }}
+                        >
+                            生成骨架
+                        </button>
+                    ) : null}
+                    {node.metadata?.rawBody ? <span className="opacity-60">已使用 raw JSON</span> : null}
+                </span>
             </div>
 
             {open ? (

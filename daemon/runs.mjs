@@ -19,6 +19,47 @@ const TERMINAL = new Set(["COMPLETED", "FAILED", "BLOCKED", "TIMED_OUT", "STOPPE
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// rawBody 在文档里是字符串（编辑器文本），到 daemon 必须统一成对象；类型不对就明确报错
+function normalizeRawBody(body) {
+    if (!body || body.rawBody === undefined || body.rawBody === null) return body;
+    let raw = body.rawBody;
+    if (typeof raw === "string") {
+        try {
+            raw = JSON.parse(raw);
+        } catch {
+            throw Object.assign(new Error("rawBody 不是合法 JSON"), { code: "invalid_raw_body" });
+        }
+    }
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+        throw Object.assign(new Error("rawBody 必须是 JSON 对象"), { code: "invalid_raw_body" });
+    }
+    return { ...body, rawBody: raw };
+}
+
+function mapRawBodyStrings(value, mapper) {
+    if (typeof value === "string") return mapper(value);
+    if (Array.isArray(value)) return value.map((item) => mapRawBodyStrings(item, mapper));
+    if (value && typeof value === "object") {
+        const next = {};
+        for (const [key, item] of Object.entries(value)) next[key] = mapRawBodyStrings(item, mapper);
+        return next;
+    }
+    return value;
+}
+
+// rawBody 里的 data URL 同样落成资产，避免入库后被脱敏成占位符
+function materializeRawBody(body, projectId, projectsDir) {
+    if (!body?.rawBody) return body;
+    const rawBody = mapRawBodyStrings(body.rawBody, (value) => {
+        if (!value.startsWith("data:")) return value;
+        const match = /^data:([^;]+);base64,([\s\S]+)$/.exec(value);
+        if (!match) return value;
+        const asset = saveAssetFromBuffer(Buffer.from(match[2], "base64"), projectsDir, projectId, match[1]);
+        return `asset:${projectId}/${asset.file}`;
+    });
+    return { ...body, rawBody };
+}
+
 // 参数里可能夹带 data URL（参考图的本地副本）：入队时落成项目资产再入库，避免撑大 DB 和日志
 function materializeReferences(body, projectId, projectsDir) {
     if (!Array.isArray(body?.references)) return body;
@@ -257,10 +298,38 @@ export function createRunEngine({ store, gateway, projectsDir, bodyDir, broadcas
         return null;
     }
 
+    async function resolveRawBodyAssets(rawBody, projectId) {
+        const cache = new Map();
+        const resolveValue = async (value) => {
+            if (typeof value === "string") {
+                if (!value.startsWith("asset:")) return value;
+                if (cache.has(value)) return cache.get(value);
+                const resolved = resolveReference(value, projectId);
+                if (!resolved?.file) throw new Error(`rawBody 里的资产无效：${value}`);
+                const url = await gateway.uploadFile(resolved.file);
+                cache.set(value, url);
+                return url;
+            }
+            if (Array.isArray(value)) return Promise.all(value.map((item) => resolveValue(item)));
+            if (value && typeof value === "object") {
+                const next = {};
+                for (const [key, item] of Object.entries(value)) next[key] = await resolveValue(item);
+                return next;
+            }
+            return value;
+        };
+        return resolveValue(rawBody);
+    }
+
     async function prepareBody(run) {
         const params = run.body || {};
         const tempFiles = [];
         const mediaUrls = [];
+        if (params.rawBody) {
+            const rawBody = await resolveRawBodyAssets(params.rawBody, run.projectId);
+            const built = buildBody({ provider: run.provider, endpoint: run.endpoint, params: { ...params, rawBody }, mediaUrls });
+            return { body: built.body, family: built.family, tempFiles };
+        }
         for (const ref of Array.isArray(params.references) ? params.references : []) {
             const resolved = resolveReference(ref, run.projectId);
             if (!resolved) continue;
@@ -344,7 +413,9 @@ export function createRunEngine({ store, gateway, projectsDir, bodyDir, broadcas
 
     return {
         enqueue({ projectId, nodeId, provider, endpoint, body }) {
-            const materialized = materializeReferences(body ?? {}, projectId, projectsDir);
+            const normalized = normalizeRawBody(body ?? {});
+            const withRaw = materializeRawBody(normalized, projectId, projectsDir);
+            const materialized = materializeReferences(withRaw, projectId, projectsDir);
             const run = store.create({
                 id: crypto.randomUUID(),
                 projectId,

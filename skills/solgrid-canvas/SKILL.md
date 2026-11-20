@@ -32,7 +32,7 @@ description: >
 
 1. **先读后改**：改之前先 `canvas_get_state` 或 `canvas_get_node`，拿到真实节点 id 与 `rev`。
 2. **不要自己算坐标**：需要往画布上放东西时用 `canvas_place_artifacts`（图片一列、文本一列，自动避让）。只有明确要求时才用 `canvas_apply_ops` 手动定位。
-3. **生成前先确认模型**：节点上没选模型时先 `canvas_list_tools` + `canvas_inspect_tool` 确认 provider/endpoint 和参数，再 `canvas_run_nodes`。
+3. **生成前先确认模型**：节点上没选模型时先 `canvas_list_tools` + `canvas_inspect_tool` 确认 provider/endpoint 和参数，再 `canvas_run_nodes`。`canvas_inspect_tool` 会返回 `skeleton`（请求体骨架）；端点没有内置模型族时，把骨架填好后放进 `params.rawBody`（**对象**，不是字符串）再调用。
 4. **生成一定会请求用户审批**：`canvas_run_nodes` 会阻塞等待用户在画布上点“允许”。用户不点或拒绝就不要重试，先把情况告诉用户。
 5. **参考素材**：上游连线节点的资产会自动作为参考图；不要把本地路径硬塞进 params。
 6. **导入路径受限**：`canvas_import_local` / `canvas_place_artifacts` 只接受项目目录、`~/.solgrid-canvas/inbox` 或 `CANVAS_IMPORT_ROOTS` 配置的目录，敏感目录一律拒绝；被拒绝时不要换路径绕过，让用户把文件放进允许目录。
