@@ -70,6 +70,7 @@ export function AcpAgentPanel() {
     const projectRef = useRef(projectId);
 
     const { models, current } = useMemo(() => modelOf(configOptions), [configOptions]);
+    const currentModelName = models.find((item) => item.id === current)?.model || models[0]?.model || "";
 
     useEffect(() => {
         projectRef.current = projectId;
@@ -269,8 +270,11 @@ export function AcpAgentPanel() {
                 onSubmit={() => void submit()}
                 onStop={stop}
                 models={models}
-                model={current}
-                onModelChange={(value: string) => void changeModel(value)}
+                model={currentModelName}
+                onModelChange={(value: string) => {
+                    const item = models.find((model) => model.model === value);
+                    if (item) void changeModel(item.id);
+                }}
             />
 
             <Modal
