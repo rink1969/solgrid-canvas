@@ -1,18 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Modal, Tag } from "antd";
-import { Bot, PanelRightClose } from "lucide-react";
+import { App, Button, Modal, Tag, Tooltip } from "antd";
+import { Bot, MessageSquarePlus, PanelRightClose, Trash2 } from "lucide-react";
 import { useMatch } from "react-router-dom";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import {
     cancelAgentPrompt,
+    createAgentConversation,
     decideAgentPermission,
+    deleteAgentConversation,
     getAgentStatus,
     getAgentTranscript,
+    listAgentConversations,
     sendAgentPrompt,
     setAgentModel,
-    startAgentSession,
     type AgentConfigOption,
+    type AgentConversation,
     type AgentTranscriptItem,
 } from "@/services/api/agent";
 import { useAgentStore, type AgentChatItem, type AgentModel } from "@/stores/use-agent-store";
@@ -49,7 +52,7 @@ function messagesFromTranscript(transcript: AgentTranscriptItem[]): AgentChatIte
     });
 }
 
-// 用上游 Agent 面板的视觉（右侧停靠 + 可拖宽），数据层换成 daemon 的 ACP 会话
+// 画布内 Agent：每个画布一个对话列表，对话之间会话隔离、可切换
 export function AcpAgentPanel() {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const match = useMatch("/canvas/:id");
@@ -57,9 +60,11 @@ export function AcpAgentPanel() {
     const setAgentState = useAgentStore((state) => state.setAgentState);
     const closePanel = useAgentStore((state) => state.closePanel);
     const panelOpen = useAgentStore((state) => state.panelOpen);
+    const { message, modal } = App.useApp();
 
+    const [conversations, setConversations] = useState<AgentConversation[]>([]);
+    const [activeId, setActiveId] = useState("");
     const [messages, setMessages] = useState<AgentChatItem[]>([]);
-    const [configOptions, setConfigOptions] = useState<AgentConfigOption[]>([]);
     const [prompt, setPrompt] = useState("");
     const [sending, setSending] = useState(false);
     const [available, setAvailable] = useState<boolean | null>(null);
@@ -68,18 +73,46 @@ export function AcpAgentPanel() {
     const [permission, setPermission] = useState<{ id: string; title?: string } | null>(null);
     const sendingRef = useRef(false);
     const projectRef = useRef(projectId);
+    const activeRef = useRef(activeId);
+    const storageKey = useMemo(() => `canvas-agent-active-conversation:${projectId}`, [projectId]);
 
+    const active = conversations.find((item) => item.id === activeId) || null;
+    const configOptions = active?.configOptions || [];
     const { models, current } = useMemo(() => modelOf(configOptions), [configOptions]);
     const currentModelName = models.find((item) => item.id === current)?.model || models[0]?.model || "";
 
     useEffect(() => {
         projectRef.current = projectId;
     }, [projectId]);
+    useEffect(() => {
+        activeRef.current = activeId;
+    }, [activeId]);
 
-    // 面板开着就同步给全局 store（时间线读 store 里的 messages）
     useEffect(() => {
         setAgentState({ messages, enabled: true, connected: available !== false, models, model: current, panelMounted: true });
     }, [messages, models, current, available, setAgentState]);
+
+    const loadTranscript = useCallback(
+        async (conversationId: string) => {
+            const { transcript } = await getAgentTranscript(projectId, conversationId);
+            setMessages(messagesFromTranscript(transcript));
+        },
+        [projectId],
+    );
+
+    const refreshConversations = useCallback(async () => {
+        const list = await listAgentConversations(projectId);
+        let next = list;
+        if (!next.length) {
+            const created = await createAgentConversation(projectId);
+            next = [created];
+        }
+        setConversations(next);
+        const saved = localStorage.getItem(storageKey);
+        const pick = next.some((item) => item.id === saved) ? (saved as string) : next[0].id;
+        setActiveId((currentId) => (next.some((item) => item.id === currentId) ? currentId : pick));
+        return next;
+    }, [projectId, storageKey]);
 
     const loadSession = useCallback(async () => {
         if (!projectId) return;
@@ -89,27 +122,43 @@ export function AcpAgentPanel() {
             setAvailable(status.available);
             setAdapter(status.adapter);
             if (!status.available) return;
-            const session = await startAgentSession(projectId);
-            setConfigOptions(session.configOptions);
-            const { transcript } = await getAgentTranscript(projectId);
-            setMessages(messagesFromTranscript(transcript));
-            setSending(false);
-            sendingRef.current = false;
+            const list = await refreshConversations();
+            const pick = localStorage.getItem(storageKey);
+            const id = list.some((item) => item.id === pick) ? (pick as string) : list[0]?.id;
+            if (id) {
+                setActiveId(id);
+                await loadTranscript(id);
+            }
         } catch (cause) {
             setAvailable(false);
             setError(cause instanceof Error ? cause.message : String(cause));
         }
-    }, [projectId]);
+    }, [projectId, refreshConversations, loadTranscript, storageKey]);
 
     useEffect(() => {
-        if (panelOpen) void loadSession();
+        if (!panelOpen) return;
+        void loadSession();
     }, [panelOpen, loadSession]);
 
-    // SSE 流式更新：直接拼到消息列表，保留打字效果
+    // 切换对话：记录当前选择并加载 transcript
+    useEffect(() => {
+        if (!activeId) return;
+        localStorage.setItem(storageKey, activeId);
+        setSending(false);
+        sendingRef.current = false;
+        void loadTranscript(activeId).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
+    }, [activeId, loadTranscript, storageKey]);
+
+    // SSE：只把当前对话的流式事件写进时间线
     useEffect(() => {
         const handler = (event: Event) => {
             const detail = (event as CustomEvent<Record<string, any>>).detail;
             if (!detail || detail.projectId !== projectRef.current) return;
+            if (detail.kind === "conversation") {
+                void refreshConversations();
+                return;
+            }
+            if (detail.conversationId !== activeRef.current) return;
             if (detail.kind === "permission") {
                 setPermission({ id: detail.id, title: detail.toolCall?.title });
                 return;
@@ -118,8 +167,8 @@ export function AcpAgentPanel() {
                 setPermission(null);
                 return;
             }
-            if (detail.kind === "model") {
-                setConfigOptions(detail.configOptions || []);
+            if (detail.kind === "session" || detail.kind === "model") {
+                setConversations((prev) => prev.map((item) => (item.id === activeRef.current ? { ...item, configOptions: detail.configOptions || item.configOptions } : item)));
                 return;
             }
             if (detail.kind === "user") {
@@ -159,18 +208,19 @@ export function AcpAgentPanel() {
         };
         window.addEventListener("canvas:agent", handler);
         return () => window.removeEventListener("canvas:agent", handler);
-    }, []);
+    }, [refreshConversations]);
 
-    // 轮询兜底：SSE 丢失/重连时对齐 transcript 与运行状态
+    // 轮询兜底：只同步当前对话的 transcript 与运行状态
     useEffect(() => {
-        if (!projectId || !panelOpen) return;
+        if (!projectId || !panelOpen || !activeId) return;
         let alive = true;
         const timer = setInterval(async () => {
             try {
-                const [transcript, status] = await Promise.all([getAgentTranscript(projectId), getAgentStatus()]);
+                const [transcript, list] = await Promise.all([getAgentTranscript(projectId, activeId), listAgentConversations(projectId)]);
                 if (!alive) return;
-                const session = status.sessions.find((item) => item.projectId === projectId);
-                const running = Boolean(session?.running);
+                setConversations(list);
+                const current = list.find((item) => item.id === activeId);
+                const running = Boolean(current?.running);
                 if (!sendingRef.current && !running) setMessages(messagesFromTranscript(transcript.transcript));
                 if (running !== sendingRef.current) {
                     sendingRef.current = running;
@@ -184,18 +234,18 @@ export function AcpAgentPanel() {
             alive = false;
             clearInterval(timer);
         };
-    }, [projectId, panelOpen]);
+    }, [projectId, panelOpen, activeId]);
 
     const submit = async () => {
         const text = prompt.trim();
-        if (!text || sending || !projectId) return;
+        if (!text || sending || !projectId || !activeId) return;
         setPrompt("");
         setError("");
         setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", text }]);
         setSending(true);
         sendingRef.current = true;
         try {
-            await sendAgentPrompt(projectId, text);
+            await sendAgentPrompt(projectId, activeId, text);
         } catch (cause) {
             setSending(false);
             sendingRef.current = false;
@@ -204,17 +254,50 @@ export function AcpAgentPanel() {
     };
 
     const stop = () => {
-        if (projectId) void cancelAgentPrompt(projectId);
+        if (projectId && activeId) void cancelAgentPrompt(projectId, activeId);
     };
 
     const changeModel = async (value: string) => {
-        if (!projectId) return;
+        if (!projectId || !activeId) return;
         try {
-            const result = await setAgentModel(projectId, "model", value);
-            setConfigOptions(result.configOptions);
+            const result = await setAgentModel(projectId, activeId, "model", value);
+            setConversations((prev) => prev.map((item) => (item.id === activeId ? { ...item, configOptions: result.configOptions } : item)));
         } catch (cause) {
             setError(cause instanceof Error ? cause.message : String(cause));
         }
+    };
+
+    const newConversation = async () => {
+        if (!projectId) return;
+        try {
+            const created = await createAgentConversation(projectId);
+            setConversations((prev) => [created, ...prev]);
+            setActiveId(created.id);
+            setMessages([]);
+            setError("");
+        } catch (cause) {
+            setError(cause instanceof Error ? cause.message : String(cause));
+        }
+    };
+
+    const removeConversation = (conversationId: string) => {
+        modal.confirm({
+            title: "删除这个对话？",
+            content: "对话记录会一并删除，无法恢复。",
+            okText: "删除",
+            okButtonProps: { danger: true },
+            cancelText: "取消",
+            onOk: async () => {
+                await deleteAgentConversation(projectId, conversationId).catch(() => undefined);
+                const rest = conversations.filter((item) => item.id !== conversationId);
+                if (rest.length) {
+                    setConversations(rest);
+                    setActiveId(rest[0].id);
+                } else {
+                    await newConversation();
+                }
+            },
+        });
     };
 
     const decide = async (allow: boolean) => {
@@ -237,6 +320,37 @@ export function AcpAgentPanel() {
                 </div>
             </div>
 
+            <div className="thin-scrollbar flex items-center gap-1 overflow-x-auto px-2 py-1" style={{ borderBottom: `1px solid ${theme.node.stroke}` }}>
+                {conversations.map((conversation) => (
+                    <button
+                        key={conversation.id}
+                        type="button"
+                        className="flex min-w-0 max-w-[150px] shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs transition"
+                        style={{
+                            background: conversation.id === activeId ? theme.toolbar.activeBg : "transparent",
+                            color: conversation.id === activeId ? theme.toolbar.activeText : theme.node.muted,
+                        }}
+                        title={conversation.title}
+                        onClick={() => setActiveId(conversation.id)}
+                    >
+                        {conversation.running ? <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" /> : null}
+                        <span className="truncate">{conversation.title || "新对话"}</span>
+                    </button>
+                ))}
+                <Tooltip title="新建对话">
+                    <button type="button" className="grid size-6 shrink-0 place-items-center rounded-md opacity-60 hover:opacity-100" onClick={() => void newConversation()} aria-label="新建对话">
+                        <MessageSquarePlus className="size-3.5" />
+                    </button>
+                </Tooltip>
+                {activeId ? (
+                    <Tooltip title="删除当前对话">
+                        <button type="button" className="ml-auto grid size-6 shrink-0 place-items-center rounded-md text-rose-500 opacity-60 hover:opacity-100" onClick={() => removeConversation(activeId)} aria-label="删除当前对话">
+                            <Trash2 className="size-3.5" />
+                        </button>
+                    </Tooltip>
+                ) : null}
+            </div>
+
             {available === false ? (
                 <div className="mx-3 rounded-lg bg-stone-100 p-3 text-xs text-stone-600 dark:bg-stone-900 dark:text-stone-300">
                     没有找到可用的 ACP Agent。目前支持 DSH 桌面版；也可以用环境变量 <code>CANVAS_ACP_COMMAND</code> / <code>CANVAS_ACP_ARGS</code> 指定别的适配器。
@@ -247,16 +361,7 @@ export function AcpAgentPanel() {
                 <div className="mx-3 rounded-lg bg-stone-100 p-3 text-xs text-stone-600 dark:bg-stone-900 dark:text-stone-300">打开一个画布项目后，Agent 会跟随这个项目工作。</div>
             ) : null}
 
-            <AgentChatTimeline
-                theme={theme}
-                pendingTool={null}
-                pendingApprovals={[]}
-                sending={sending}
-                waiting={sending}
-                onRejectTool={() => undefined}
-                onApproveTool={() => undefined}
-                onApprovalDecision={() => undefined}
-            />
+            <AgentChatTimeline theme={theme} pendingTool={null} pendingApprovals={[]} sending={sending} waiting={sending} onRejectTool={() => undefined} onApproveTool={() => undefined} onApprovalDecision={() => undefined} />
 
             {error ? <div className="px-3 pb-1 text-xs text-red-500">{error}</div> : null}
 
@@ -264,7 +369,7 @@ export function AcpAgentPanel() {
                 prompt={prompt}
                 theme={theme}
                 placeholder="让 Agent 做点什么，例如：在画布上把这两个节点连起来"
-                disabled={!projectId || available === false}
+                disabled={!projectId || !activeId || available === false}
                 sending={sending}
                 onPromptChange={setPrompt}
                 onSubmit={() => void submit()}

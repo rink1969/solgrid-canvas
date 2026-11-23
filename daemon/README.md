@@ -109,12 +109,20 @@ POST /api/video-edits/:id/cancel
 
 ## 画布 → Agent（ACP）
 
+每个画布多个对话，数据落在 `projects/<id>/agent/`（`conversations.json` + `transcripts/<conversationId>.json`）。
+
 ```bash
-curl -XPOST /api/agent/start   -d '{"projectId":"…"}'   # 建会话（注入 canvas MCP）
-curl -XPOST /api/agent/prompt  -d '{"projectId":"…","text":"…"}'
-curl      /api/agent/transcript?projectId=…
-curl -XPOST /api/agent/cancel  -d '{"projectId":"…"}'
-curl -XPOST /api/agent/model   -d '{"projectId":"…","configId":"model","value":"…"}'
+# 列表 / 新建 / 重命名 / 删除
+curl      /api/projects/:id/agent/conversations
+curl -XPOST /api/projects/:id/agent/conversations -d '{"title":"…"}'
+curl -XPATCH /api/projects/:id/agent/conversations/:cid -d '{"title":"…"}'
+curl -XDELETE /api/projects/:id/agent/conversations/:cid
+
+# 单个对话
+curl      /api/projects/:id/agent/conversations/:cid/transcript
+curl -XPOST /api/projects/:id/agent/conversations/:cid/prompt -d '{"text":"…"}'
+curl -XPOST /api/projects/:id/agent/conversations/:cid/cancel
+curl -XPOST /api/projects/:id/agent/conversations/:cid/model -d '{"configId":"model","value":"…"}'
 curl -XPOST /api/agent/permissions/:id -d '{"allow":true}'
 ```
 

@@ -1,4 +1,4 @@
-// 画布 → 本地 Agent（ACP）：经 daemon 转发，浏览器不碰 Agent 配置
+// 画布 → 本地 Agent（ACP）：每个画布多个对话，经 daemon 转发
 export type AgentOption = { value: string; name: string; description?: string };
 export type AgentConfigOption = {
     id: string;
@@ -19,6 +19,15 @@ export type AgentTranscriptItem = {
     status?: string;
 };
 
+export type AgentConversation = {
+    id: string;
+    title: string;
+    createdAt?: string;
+    updatedAt?: string;
+    running?: boolean;
+    configOptions?: AgentConfigOption[];
+};
+
 async function request<T>(pathname: string, init?: { method?: string; body?: string }): Promise<T> {
     const response = await fetch(`/api${pathname}`, {
         method: init?.method,
@@ -33,27 +42,37 @@ async function request<T>(pathname: string, init?: { method?: string; body?: str
 }
 
 export function getAgentStatus() {
-    return request<{ available: boolean; adapter: string | null; sessions: Array<{ projectId: string; sessionId: string; running: boolean; configOptions: AgentConfigOption[] }> }>("/agent/status");
+    return request<{ available: boolean; adapter: string | null; sessions: Array<{ projectId: string; conversationId: string; sessionId: string; running: boolean; configOptions: AgentConfigOption[] }> }>("/agent/status");
 }
 
-export function startAgentSession(projectId: string) {
-    return request<{ sessionId: string; configOptions: AgentConfigOption[] }>("/agent/start", { method: "POST", body: JSON.stringify({ projectId }) });
+export async function listAgentConversations(projectId: string): Promise<AgentConversation[]> {
+    const data = await request<{ conversations: AgentConversation[] }>(`/projects/${projectId}/agent/conversations`);
+    return data.conversations || [];
 }
 
-export function getAgentTranscript(projectId: string) {
-    return request<{ transcript: AgentTranscriptItem[] }>(`/agent/transcript?projectId=${encodeURIComponent(projectId)}`);
+export async function createAgentConversation(projectId: string, title?: string): Promise<AgentConversation> {
+    const data = await request<{ conversation: AgentConversation }>(`/projects/${projectId}/agent/conversations`, { method: "POST", body: JSON.stringify({ title }) });
+    return data.conversation;
 }
 
-export function sendAgentPrompt(projectId: string, text: string) {
-    return request<{ ok: boolean }>("/agent/prompt", { method: "POST", body: JSON.stringify({ projectId, text }) });
+export function deleteAgentConversation(projectId: string, conversationId: string) {
+    return request<{ ok: boolean }>(`/projects/${projectId}/agent/conversations/${conversationId}`, { method: "DELETE" });
 }
 
-export function cancelAgentPrompt(projectId: string) {
-    return request<{ ok: boolean }>("/agent/cancel", { method: "POST", body: JSON.stringify({ projectId }) });
+export function getAgentTranscript(projectId: string, conversationId: string) {
+    return request<{ transcript: AgentTranscriptItem[] }>(`/projects/${projectId}/agent/conversations/${conversationId}/transcript`);
 }
 
-export function setAgentModel(projectId: string, configId: string, value: string) {
-    return request<{ configOptions: AgentConfigOption[] }>("/agent/model", { method: "POST", body: JSON.stringify({ projectId, configId, value }) });
+export function sendAgentPrompt(projectId: string, conversationId: string, text: string) {
+    return request<{ ok: boolean }>(`/projects/${projectId}/agent/conversations/${conversationId}/prompt`, { method: "POST", body: JSON.stringify({ text }) });
+}
+
+export function cancelAgentPrompt(projectId: string, conversationId: string) {
+    return request<{ ok: boolean }>(`/projects/${projectId}/agent/conversations/${conversationId}/cancel`, { method: "POST" });
+}
+
+export function setAgentModel(projectId: string, conversationId: string, configId: string, value: string) {
+    return request<{ configOptions: AgentConfigOption[] }>(`/projects/${projectId}/agent/conversations/${conversationId}/model`, { method: "POST", body: JSON.stringify({ configId, value }) });
 }
 
 export function decideAgentPermission(id: string, allow: boolean) {

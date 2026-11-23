@@ -166,46 +166,343 @@ function writeSessionFile(cwd, sessionId) {
     }
 }
 
+function agentDir(cwd) {
+    return path.join(cwd, "agent");
+}
+
+function conversationsPath(cwd) {
+    return path.join(agentDir(cwd), "conversations.json");
+}
+
+function transcriptPath(cwd, conversationId) {
+    return path.join(agentDir(cwd), "transcripts", `${conversationId}.json`);
+}
+
+function readJson(file, fallback) {
+    try {
+        return JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch {
+        return fallback;
+    }
+}
+
+function writeJson(file, value) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(value, null, 2));
+    fs.renameSync(tmp, file);
+}
+
 export function createAgentManager({ broadcast, log }) {
     const adapter = resolveAdapter();
     let connection = null;
     let initializing = null;
-    const sessions = new Map(); // projectId -> { sessionId, configOptions, running, transcript, pendingPrompt }
-    const permissions = new Map(); // id -> { requestId, projectId, params }
+    const runtimes = new Map(); // `${projectId}/${conversationId}` -> runtime
+    const bySession = new Map(); // sessionId -> runtime
+    const projects = new Map(); // projectId -> { cwd, conversations: [] }
+    const permissions = new Map(); // id -> { requestId, projectId, conversationId }
+    const transcriptTimers = new Map();
 
-    function emit(projectId, event) {
-        broadcast?.({ type: "agent.event", projectId, ...event });
+    return manager();
+
+    function manager() {
+        return {
+            status() {
+                return {
+                    available: Boolean(adapter),
+                    adapter: adapter?.id || null,
+                    sessions: [...runtimes.values()].map((runtime) => ({
+                        projectId: runtime.projectId,
+                        conversationId: runtime.conversationId,
+                        sessionId: runtime.sessionId,
+                        running: runtime.running,
+                        configOptions: runtime.configOptions,
+                    })),
+                };
+            },
+            listConversations(projectId, cwd) {
+                const entry = loadProject(projectId, cwd);
+                return entry.conversations
+                    .slice()
+                    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+                    .map((conversation) => summary(projectId, conversation));
+            },
+            createConversation(projectId, cwd, title) {
+                const entry = loadProject(projectId, cwd);
+                const conversation = {
+                    id: crypto.randomUUID(),
+                    title: String(title || "").trim() || "新对话",
+                    sessionId: null,
+                    configOptions: [],
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                };
+                entry.conversations.push(conversation);
+                saveConversations(projectId);
+                emit(projectId, conversation.id, { kind: "conversation", action: "created" });
+                return summary(projectId, conversation);
+            },
+            renameConversation(projectId, cwd, conversationId, title) {
+                const conversation = findConversation(projectId, cwd, conversationId);
+                conversation.title = String(title || "").trim() || conversation.title;
+                conversation.updatedAt = new Date().toISOString();
+                saveConversations(projectId);
+                emit(projectId, conversationId, { kind: "conversation", action: "renamed" });
+                return summary(projectId, conversation);
+            },
+            deleteConversation(projectId, cwd, conversationId) {
+                const entry = loadProject(projectId, cwd);
+                const index = entry.conversations.findIndex((item) => item.id === conversationId);
+                if (index < 0) return false;
+                const [conversation] = entry.conversations.splice(index, 1);
+                const key = runtimeKey(projectId, conversationId);
+                const runtime = runtimes.get(key);
+                if (runtime) {
+                    if (connection) connection.notify("session/close", { sessionId: runtime.sessionId });
+                    bySession.delete(runtime.sessionId);
+                    runtimes.delete(key);
+                }
+                try {
+                    fs.rmSync(transcriptPath(cwd, conversation.id), { force: true });
+                } catch {
+                    /* 忽略 */
+                }
+                saveConversations(projectId);
+                emit(projectId, conversationId, { kind: "conversation", action: "deleted" });
+                return true;
+            },
+            transcript(projectId, cwd, conversationId) {
+                const runtime = runtimes.get(runtimeKey(projectId, conversationId));
+                if (runtime) return runtime.transcript;
+                const saved = readJson(transcriptPath(cwd, conversationId), null);
+                return Array.isArray(saved?.messages) ? saved.messages : [];
+            },
+            async ensureSession(projectId, cwd, conversationId) {
+                const conversation = findConversation(projectId, cwd, conversationId);
+                const key = runtimeKey(projectId, conversationId);
+                const existing = runtimes.get(key);
+                if (existing) return existing;
+
+                const client = await ensureConnection();
+                const transcript = Array.isArray(readJson(transcriptPath(cwd, conversationId), null)?.messages)
+                    ? readJson(transcriptPath(cwd, conversationId), {}).messages
+                    : [];
+
+                let sessionId = conversation.sessionId;
+                let configOptions = conversation.configOptions || [];
+                let resumed = false;
+                if (sessionId) {
+                    try {
+                        const result = await client.request("session/resume", { sessionId, cwd, mcpServers: [mcpEntry()] });
+                        configOptions = result?.configOptions || configOptions;
+                        resumed = true;
+                    } catch (error) {
+                        log(`[acp] 恢复会话失败，改为新建：${error.message}`);
+                        sessionId = null;
+                    }
+                }
+                if (!sessionId) {
+                    const result = await client.request("session/new", { cwd, mcpServers: [mcpEntry()] });
+                    sessionId = result.sessionId;
+                    configOptions = result.configOptions || [];
+                }
+
+                conversation.sessionId = sessionId;
+                conversation.configOptions = configOptions;
+                conversation.updatedAt = new Date().toISOString();
+                saveConversations(projectId);
+
+                const runtime = { projectId, conversationId, cwd, sessionId, configOptions, running: false, transcript };
+                runtimes.set(key, runtime);
+                bySession.set(sessionId, runtime);
+                emit(projectId, conversationId, { kind: "session", sessionId, configOptions, resumed });
+                return runtime;
+            },
+            async setModel(projectId, cwd, conversationId, configId, value) {
+                const runtime = await this.ensureSession(projectId, cwd, conversationId);
+                const result = await (await ensureConnection()).request("session/set_config_option", { sessionId: runtime.sessionId, configId, value });
+                runtime.configOptions = result?.configOptions || runtime.configOptions;
+                const conversation = findConversation(projectId, cwd, conversationId);
+                conversation.configOptions = runtime.configOptions;
+                conversation.updatedAt = new Date().toISOString();
+                saveConversations(projectId);
+                emit(projectId, conversationId, { kind: "model", configOptions: runtime.configOptions });
+                return runtime.configOptions;
+            },
+            async prompt(projectId, cwd, conversationId, text) {
+                const runtime = await this.ensureSession(projectId, cwd, conversationId);
+                if (runtime.running) throw new Error("上一轮还在进行中");
+                runtime.running = true;
+                const conversation = findConversation(projectId, cwd, conversationId);
+                if (!conversation.title || conversation.title === "新对话") conversation.title = String(text).slice(0, 24);
+                conversation.updatedAt = new Date().toISOString();
+                saveConversations(projectId);
+
+                runtime.transcript.push({ role: "user", text });
+                emit(projectId, conversationId, { kind: "user", text });
+                emit(projectId, conversationId, { kind: "conversation", action: "updated" });
+                persistTranscript(projectId, conversationId, cwd, runtime.transcript);
+
+                const client = await ensureConnection();
+                const promise = client.request("session/prompt", { sessionId: runtime.sessionId, prompt: [{ type: "text", text }] }, 0);
+                promise
+                    .then((result) => {
+                        runtime.running = false;
+                        conversation.updatedAt = new Date().toISOString();
+                        saveConversations(projectId);
+                        persistTranscript(projectId, conversationId, cwd, runtime.transcript);
+                        emit(projectId, conversationId, { kind: "done", stopReason: result?.stopReason });
+                    })
+                    .catch((error) => {
+                        runtime.running = false;
+                        persistTranscript(projectId, conversationId, cwd, runtime.transcript);
+                        if (/not found|unknown session|invalid session/i.test(error.message)) {
+                            runtimes.delete(runtimeKey(projectId, conversationId));
+                            bySession.delete(runtime.sessionId);
+                            conversation.sessionId = null;
+                            saveConversations(projectId);
+                            emit(projectId, conversationId, { kind: "done", error: "Agent 会话已失效，已重置，请重新发送" });
+                            return;
+                        }
+                        emit(projectId, conversationId, { kind: "done", error: error.message });
+                    });
+                return { ok: true };
+            },
+            async cancel(projectId, cwd, conversationId) {
+                const runtime = runtimes.get(runtimeKey(projectId, conversationId));
+                if (!runtime) return;
+                const client = await ensureConnection();
+                client.notify("session/cancel", { sessionId: runtime.sessionId });
+            },
+            decidePermission(id, allow) {
+                const item = permissions.get(id);
+                if (!item) return false;
+                permissions.delete(id);
+                const options = item.params?.options || [];
+                const wanted = allow
+                    ? options.find((option) => /allow/.test(option.kind || "")) || options[0]
+                    : options.find((option) => /reject/.test(option.kind || "")) || options[options.length - 1];
+                connection?.respond(item.requestId, { outcome: { outcome: "selected", optionId: wanted?.optionId } });
+                emit(item.projectId, item.conversationId, { kind: "permission-decided", id, allow });
+                return true;
+            },
+            close() {
+                connection?.close();
+                connection = null;
+                runtimes.clear();
+                bySession.clear();
+            },
+        };
+    }
+
+    // ---- 内部实现 ----
+
+    function runtimeKey(projectId, conversationId) {
+        return `${projectId}/${conversationId}`;
+    }
+
+    function loadProject(projectId, cwd) {
+        const existing = projects.get(projectId);
+        if (existing) {
+            existing.cwd = cwd;
+            return existing;
+        }
+        const file = conversationsPath(cwd);
+        const saved = readJson(file, null);
+        let conversations = Array.isArray(saved?.conversations) ? saved.conversations : null;
+        if (!conversations) {
+            // 兼容旧版：agent-session.json 里只有一个 sessionId
+            const legacy = readJson(path.join(cwd, "agent-session.json"), null);
+            conversations = legacy?.sessionId
+                ? [{ id: "default", title: "默认会话", sessionId: legacy.sessionId, configOptions: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }]
+                : [];
+            writeJson(file, { conversations });
+        }
+        const entry = { cwd, conversations };
+        projects.set(projectId, entry);
+        return entry;
+    }
+
+    function findConversation(projectId, cwd, conversationId) {
+        const entry = loadProject(projectId, cwd);
+        const conversation = conversationId ? entry.conversations.find((item) => item.id === conversationId) : null;
+        if (!conversation) throw new Error("对话不存在");
+        return conversation;
+    }
+
+    function saveConversations(projectId) {
+        const entry = projects.get(projectId);
+        if (!entry) return;
+        try {
+            writeJson(conversationsPath(entry.cwd), { conversations: entry.conversations });
+        } catch (error) {
+            log(`[acp] 对话列表写入失败：${error.message}`);
+        }
+    }
+
+    function persistTranscript(projectId, conversationId, cwd, transcript) {
+        const key = runtimeKey(projectId, conversationId);
+        const timer = transcriptTimers.get(key);
+        if (timer) clearTimeout(timer);
+        const write = () => {
+            transcriptTimers.delete(key);
+            try {
+                writeJson(transcriptPath(cwd, conversationId), { messages: transcript });
+            } catch (error) {
+                log(`[acp] transcript 写入失败：${error.message}`);
+            }
+        };
+        // 流式更新很频繁，合并成 400ms 一次写盘；done 时再强制落一次
+        const next = setTimeout(write, 400);
+        next.unref?.();
+        transcriptTimers.set(key, next);
+    }
+
+    function summary(projectId, conversation) {
+        const runtime = runtimes.get(runtimeKey(projectId, conversation.id));
+        return {
+            id: conversation.id,
+            title: conversation.title,
+            createdAt: conversation.createdAt,
+            updatedAt: conversation.updatedAt,
+            running: Boolean(runtime?.running),
+            configOptions: runtime?.configOptions || conversation.configOptions || [],
+        };
+    }
+
+    function emit(projectId, conversationId, event) {
+        broadcast?.({ type: "agent.event", projectId, conversationId, ...event });
     }
 
     function handleNotification(message) {
         const params = message.params || {};
-        const projectId = [...sessions.entries()].find(([, item]) => item.sessionId === params.sessionId)?.[0];
-        if (!projectId) return;
-        const session = sessions.get(projectId);
-
+        const runtime = bySession.get(params.sessionId);
+        if (!runtime) return;
         if (message.method === "session/update") {
             const update = params.update || {};
             const kind = update.sessionUpdate || update.type;
             if (kind === "agent_message_chunk" || kind === "agent_thought_chunk") {
                 const text = update.content?.text || "";
                 const role = kind === "agent_message_chunk" ? "assistant" : "thought";
-                const last = session.transcript[session.transcript.length - 1];
+                const last = runtime.transcript[runtime.transcript.length - 1];
                 if (last && last.role === role && last.messageId && last.messageId === update.messageId) last.text += text;
-                else session.transcript.push({ role, text, messageId: update.messageId });
+                else runtime.transcript.push({ role, text, messageId: update.messageId });
+                persistTranscript(runtime.projectId, runtime.conversationId, runtime.cwd, runtime.transcript);
             } else if (kind === "tool_call") {
-                session.transcript.push({ role: "tool", toolCallId: update.toolCallId, title: update.title, kind: update.kind, status: update.status });
+                runtime.transcript.push({ role: "tool", toolCallId: update.toolCallId, title: update.title, kind: update.kind, status: update.status });
+                persistTranscript(runtime.projectId, runtime.conversationId, runtime.cwd, runtime.transcript);
             } else if (kind === "tool_call_update") {
-                const item = session.transcript.find((entry) => entry.toolCallId === update.toolCallId);
+                const item = runtime.transcript.find((entry) => entry.toolCallId === update.toolCallId);
                 if (item) Object.assign(item, { status: update.status, content: update.content });
+                persistTranscript(runtime.projectId, runtime.conversationId, runtime.cwd, runtime.transcript);
             }
-            emit(projectId, { kind: "update", update });
+            emit(runtime.projectId, runtime.conversationId, { kind: "update", update });
             return;
         }
         if (message.method === "session/request_permission") {
             const id = `perm-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-            permissions.set(id, { requestId: message.id, projectId, params });
-            emit(projectId, { kind: "permission", id, toolCall: params.toolCall, options: params.options });
-            return;
+            permissions.set(id, { requestId: message.id, projectId: runtime.projectId, conversationId: runtime.conversationId, params });
+            emit(runtime.projectId, runtime.conversationId, { kind: "permission", id, toolCall: params.toolCall, options: params.options });
         }
     }
 
@@ -214,9 +511,14 @@ export function createAgentManager({ broadcast, log }) {
         if (!adapter) throw new Error("没有可用的 ACP Agent：未找到 DSH 桌面版，也没有配置 CANVAS_ACP_COMMAND");
         if (initializing) return initializing;
         initializing = (async () => {
-            connection = createConnection({ adapter, onNotification: handleNotification, onRequest: (message) => {
-                if (message.method === "session/request_permission") handleNotification(message);
-            }, log });
+            connection = createConnection({
+                adapter,
+                onNotification: handleNotification,
+                onRequest: (message) => {
+                    if (message.method === "session/request_permission") handleNotification(message);
+                },
+                log,
+            });
             await connection.request("initialize", { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: "solgrid-canvas", version: "0.1.0" } });
             return connection;
         })().finally(() => {
@@ -224,105 +526,4 @@ export function createAgentManager({ broadcast, log }) {
         });
         return initializing;
     }
-
-    return {
-        status() {
-            return {
-                available: Boolean(adapter),
-                adapter: adapter?.id || null,
-                sessions: [...sessions.entries()].map(([projectId, item]) => ({ projectId, sessionId: item.sessionId, running: item.running, configOptions: item.configOptions })),
-            };
-        },
-        transcript(projectId) {
-            return sessions.get(projectId)?.transcript || [];
-        },
-        async ensureSession(projectId, cwd) {
-            const existing = sessions.get(projectId);
-            if (existing) return existing;
-            const client = await ensureConnection();
-
-            // 先尝试恢复上次的会话（daemon 重启后仍能接上上下文）
-            const saved = readSessionFile(cwd);
-            if (saved?.sessionId) {
-                try {
-                    const resumed = await client.request("session/resume", { sessionId: saved.sessionId, cwd, mcpServers: [mcpEntry()] });
-                    const session = { sessionId: saved.sessionId, configOptions: resumed?.configOptions || [], running: false, transcript: [], resumed: true };
-                    sessions.set(projectId, session);
-                    emit(projectId, { kind: "session", sessionId: session.sessionId, configOptions: session.configOptions, resumed: true });
-                    return session;
-                } catch (error) {
-                    log(`[acp] 恢复会话失败，改为新建：${error.message}`);
-                }
-            }
-
-            const result = await client.request("session/new", { cwd, mcpServers: [mcpEntry()] });
-            const session = { sessionId: result.sessionId, configOptions: result.configOptions || [], running: false, transcript: [] };
-            sessions.set(projectId, session);
-            writeSessionFile(cwd, session.sessionId);
-            emit(projectId, { kind: "session", sessionId: session.sessionId, configOptions: session.configOptions });
-            return session;
-        },
-        async setModel(projectId, configId, value) {
-            const session = sessions.get(projectId);
-            if (!session) throw new Error("会话还没建立");
-            const result = await (await ensureConnection()).request("session/set_config_option", { sessionId: session.sessionId, configId, value });
-            session.configOptions = result?.configOptions || session.configOptions;
-            emit(projectId, { kind: "model", configOptions: session.configOptions });
-            return session.configOptions;
-        },
-        async prompt(projectId, text) {
-            const session = sessions.get(projectId);
-            if (!session) throw new Error("会话还没建立");
-            if (session.running) throw new Error("上一轮还在进行中");
-            session.running = true;
-            session.transcript.push({ role: "user", text });
-            emit(projectId, { kind: "user", text });
-            const client = await ensureConnection();
-            const promise = client.request("session/prompt", { sessionId: session.sessionId, prompt: [{ type: "text", text }] }, 0);
-            promise
-                .then((result) => {
-                    session.running = false;
-                    emit(projectId, { kind: "done", stopReason: result?.stopReason });
-                })
-                .catch((error) => {
-                    session.running = false;
-                    if (/not found|unknown session|invalid session/i.test(error.message)) {
-                        try {
-                            fs.rmSync(sessionFile(path.join(ROOT, "projects", projectId)), { force: true });
-                        } catch {
-                            /* 忽略清理失败 */
-                        }
-                        sessions.delete(projectId);
-                        emit(projectId, { kind: "done", error: "Agent 会话已失效，已重置，请重新发送" });
-                        return;
-                    }
-                    emit(projectId, { kind: "done", error: error.message });
-                });
-            return { ok: true };
-        },
-        async cancel(projectId) {
-            const session = sessions.get(projectId);
-            if (!session) return;
-            const client = await ensureConnection();
-            client.notify("session/cancel", { sessionId: session.sessionId });
-        },
-        decidePermission(id, allow) {
-            const item = permissions.get(id);
-            if (!item) return false;
-            permissions.delete(id);
-            const options = item.params?.options || [];
-            const wanted = allow
-                ? options.find((option) => /allow/.test(option.kind || "")) || options[0]
-                : options.find((option) => /reject/.test(option.kind || "")) || options[options.length - 1];
-            const client = connection;
-            client?.respond(item.requestId, { outcome: { outcome: "selected", optionId: wanted?.optionId } });
-            emit(item.projectId, { kind: "permission-decided", id, allow });
-            return true;
-        },
-        close() {
-            connection?.close();
-            connection = null;
-            sessions.clear();
-        },
-    };
 }

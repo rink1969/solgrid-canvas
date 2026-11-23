@@ -1,4 +1,4 @@
-// ACP 冒烟：临时 daemon + 真实 DSH ACP agent，验证 会话建立 / 模型切换 / prompt / transcript。
+// ACP 多对话冒烟：同一画布两个对话隔离、重启后持久化、删除。
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -10,6 +10,7 @@ const TOKEN = "smoke-acp";
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), "solgrid-canvas-acp-"));
 const BASE = `http://127.0.0.1:${PORT}`;
 const headers = { "content-type": "application/json", "x-canvas-token": TOKEN };
+const PROJECT = "acpproj";
 
 function spawnDaemon() {
     const child = spawn(process.execPath, [path.join(here, "server.mjs")], {
@@ -23,7 +24,22 @@ function spawnDaemon() {
     });
     return child;
 }
+
 let daemon = spawnDaemon();
+
+const api = async (pathname, init) => {
+    const response = await fetch(`${BASE}${pathname}`, { ...init, headers });
+    const text = await response.text();
+    return { status: response.status, json: text ? JSON.parse(text) : null };
+};
+
+const post = (pathname, body) => api(pathname, { method: "POST", body: JSON.stringify(body ?? {}) });
+
+let failed = 0;
+const check = (name, ok, detail) => {
+    console.log(`${ok ? "✓" : "✗"} ${name}${ok || !detail ? "" : ` — ${detail}`}`);
+    if (!ok) failed++;
+};
 
 async function waitHealth() {
     for (let i = 0; i < 80; i++) {
@@ -37,27 +53,26 @@ async function waitHealth() {
     throw new Error("daemon 未启动");
 }
 
-const api = async (pathname, init) => {
-    const response = await fetch(`${BASE}${pathname}`, { ...init, headers });
-    const text = await response.text();
-    return { status: response.status, json: text ? JSON.parse(text) : null };
-};
-
-let failed = 0;
-const check = (name, ok, detail) => {
-    console.log(`${ok ? "✓" : "✗"} ${name}${ok || !detail ? "" : ` — ${detail}`}`);
-    if (!ok) failed++;
-};
+async function waitAssistant(projectId, conversationId, timeoutMs = 60000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        const result = await api(`/api/projects/${projectId}/agent/conversations/${conversationId}/transcript`);
+        const transcript = result.json?.transcript || [];
+        const text = transcript.filter((item) => item.role === "assistant").map((item) => item.text).join("");
+        if (text.trim()) return { transcript, text };
+    }
+    return { transcript: [], text: "" };
+}
 
 try {
     await waitHealth();
-
-    await api("/api/projects/acpproj", {
+    await api(`/api/projects/${PROJECT}`, {
         method: "PUT",
         body: JSON.stringify({
             project: {
-                id: "acpproj",
-                title: "ACP 冒烟",
+                id: PROJECT,
+                title: "ACP 多对话冒烟",
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
                 backgroundMode: "lines",
@@ -74,46 +89,54 @@ try {
     const status = await api("/api/agent/status");
     check("检测到 ACP 适配器", status.json?.available === true && status.json.adapter === "dsh", JSON.stringify(status.json));
 
-    const started = await api("/api/agent/start", { method: "POST", body: JSON.stringify({ projectId: "acpproj" }) });
-    check("建立 ACP 会话", Boolean(started.json?.sessionId), JSON.stringify(started.json).slice(0, 200));
+    const empty = await api(`/api/projects/${PROJECT}/agent/conversations`);
+    check("新画布对话列表为空", Array.isArray(empty.json?.conversations) && empty.json.conversations.length === 0);
 
-    const options = started.json?.configOptions || [];
-    const model = options.find((option) => option.id === "model");
-    check("默认模型来自 ACP profile 同步", String(model?.currentValue || "").includes("deepseek-account"), String(model?.currentValue));
-    const account = model?.options?.flatMap((group) => group.options || []).find((option) => option.value.includes("deepseek-account"));
-    if (account) {
-        const changed = await api("/api/agent/model", { method: "POST", body: JSON.stringify({ projectId: "acpproj", configId: "model", value: account.value }) });
-        check("切换模型路由", Boolean(changed.json?.configOptions), JSON.stringify(changed.json).slice(0, 150));
-    }
+    const createdA = await post(`/api/projects/${PROJECT}/agent/conversations`, { title: "对话 A" });
+    const conversationA = createdA.json?.conversation;
+    check("创建对话 A", Boolean(conversationA?.id), JSON.stringify(createdA.json).slice(0, 160));
 
-    await api("/api/agent/prompt", { method: "POST", body: JSON.stringify({ projectId: "acpproj", text: "只回答一句话：你当前可用的工具里有没有以 mcp__solgrid_canvas 开头的？不要调用工具、不要读写文件。" }) });
+    const promptA = await post(`/api/projects/${PROJECT}/agent/conversations/${conversationA.id}/prompt`, { text: "只回复两个字：收到A" });
+    check("对话 A 提交成功", promptA.status === 200, JSON.stringify(promptA.json).slice(0, 160));
+    const replyA = await waitAssistant(PROJECT, conversationA.id);
+    check("对话 A 拿到回复", replyA.text.length > 0, replyA.text.slice(0, 60));
 
-    let transcript = [];
-    for (let i = 0; i < 90; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        const payload = await api("/api/agent/transcript?projectId=acpproj");
-        transcript = payload.json?.transcript || [];
-        const assistant = transcript.filter((item) => item.role === "assistant").map((item) => item.text).join("");
-        if (assistant.includes("有") || assistant.length > 10) break;
-    }
-    const assistantText = transcript.filter((item) => item.role === "assistant").map((item) => item.text).join("");
-    check("拿到 Agent 回复", assistantText.length > 0, assistantText.slice(0, 120));
-    check("Agent 能看到 canvas MCP 工具", /mcp__solgrid_canvas|canvas_get_state|canvas_run_nodes/.test(assistantText), assistantText.slice(0, 160));
-    // 会话持久化：重启 daemon 后应恢复同一个 sessionId
-    const firstSessionId = started.json?.sessionId;
+    const createdB = await post(`/api/projects/${PROJECT}/agent/conversations`, { title: "对话 B" });
+    const conversationB = createdB.json?.conversation;
+    check("创建对话 B", Boolean(conversationB?.id) && conversationB.id !== conversationA.id);
+    await post(`/api/projects/${PROJECT}/agent/conversations/${conversationB.id}/prompt`, { text: "只回复两个字：收到B" });
+    const replyB = await waitAssistant(PROJECT, conversationB.id);
+    check("对话 B 拿到回复", replyB.text.length > 0, replyB.text.slice(0, 60));
+    check("对话 A 不含 B 的内容", !replyA.text.includes("收到B") && !replyB.text.includes("收到A"), `A=${replyA.text.slice(0, 40)} B=${replyB.text.slice(0, 40)}`);
+
+    const listed = await api(`/api/projects/${PROJECT}/agent/conversations`);
+    check("列表包含两个对话", listed.json?.conversations?.length === 2, JSON.stringify(listed.json?.conversations?.map((item) => item.title)));
+
+    // 重启 daemon：对话与 transcript 都要保留
     daemon.kill();
     await new Promise((resolve) => setTimeout(resolve, 1200));
     daemon = spawnDaemon();
     await waitHealth();
-    const restarted = await api("/api/agent/start", { method: "POST", body: JSON.stringify({ projectId: "acpproj" }) });
-    check("重启 daemon 后恢复同一会话", restarted.json?.sessionId === firstSessionId, `first=${firstSessionId} restarted=${restarted.json?.sessionId}`);
+    const afterRestart = await api(`/api/projects/${PROJECT}/agent/conversations`);
+    check("重启后对话列表保留", afterRestart.json?.conversations?.length === 2);
+    const persistedA = await api(`/api/projects/${PROJECT}/agent/conversations/${conversationA.id}/transcript`);
+    check("重启后 transcript 保留", (persistedA.json?.transcript || []).some((item) => item.role === "assistant" && item.text), JSON.stringify(persistedA.json?.transcript?.length));
+
+    const deleted = await api(`/api/projects/${PROJECT}/agent/conversations/${conversationB.id}`, { method: "DELETE" });
+    check("删除对话 B", deleted.status === 200 && deleted.json?.ok === true);
+    const finalList = await api(`/api/projects/${PROJECT}/agent/conversations`);
+    check("删除后只剩一个对话", finalList.json?.conversations?.length === 1);
 } catch (error) {
     console.error("冒烟测试异常:", error);
     failed++;
 } finally {
     daemon.kill();
     await new Promise((resolve) => setTimeout(resolve, 500));
-    fs.rmSync(HOME, { recursive: true, force: true });
+    try {
+        fs.rmSync(HOME, { recursive: true, force: true });
+    } catch {
+        /* 临时目录可能被占用 */
+    }
     console.log(failed === 0 ? "\n全部通过" : `\n${failed} 项失败`);
     process.exitCode = failed === 0 ? 0 : 1;
 }

@@ -347,76 +347,94 @@ async function handle(req, res) {
         return sendJson(res, ok ? 200 : 404, { ok });
     }
 
-    // ---- Agent（ACP）：画布 → 本地 Agent ----
+    // ---- Agent（ACP）：画布 → 本地 Agent（每个画布多个对话）----
     if (pathname === "/api/agent/status" && req.method === "GET") {
         return sendJson(res, 200, agent.status());
     }
 
-    if (pathname === "/api/agent/start" && req.method === "POST") {
-        let body;
-        try {
-            body = JSON.parse(await readBody(req));
-        } catch (error) {
-            return sendJson(res, 400, { error: "invalid_json", message: error.message });
-        }
-        const projectId = body?.projectId;
-        if (!projectId) return sendJson(res, 400, { error: "missing_project" });
+    const conversationProject = pathname.match(/^\/api\/projects\/([A-Za-z0-9_-]{1,64})\/agent\/conversations$/);
+    if (conversationProject) {
+        const projectId = conversationProject[1];
         if (!store.readProject(projectId)) return sendJson(res, 404, { error: "not_found" });
-        try {
-            const session = await agent.ensureSession(projectId, path.join(store.projectsDir, projectId));
-            return sendJson(res, 200, { sessionId: session.sessionId, configOptions: session.configOptions });
-        } catch (error) {
-            return sendJson(res, 502, { error: "agent_unavailable", message: error.message });
+        const cwd = path.join(store.projectsDir, projectId);
+        if (req.method === "GET") return sendJson(res, 200, { conversations: agent.listConversations(projectId, cwd) });
+        if (req.method === "POST") {
+            let body;
+            try {
+                body = JSON.parse(await readBody(req));
+            } catch (error) {
+                return sendJson(res, 400, { error: "invalid_json", message: error.message });
+            }
+            return sendJson(res, 200, { conversation: agent.createConversation(projectId, cwd, body?.title) });
         }
+        return sendJson(res, 405, { error: "method_not_allowed" });
     }
 
-    if (pathname === "/api/agent/transcript" && req.method === "GET") {
-        const projectId = url.searchParams.get("projectId") || "";
-        return sendJson(res, 200, { transcript: agent.transcript(projectId) });
+    const conversationItem = pathname.match(/^\/api\/projects\/([A-Za-z0-9_-]{1,64})\/agent\/conversations\/([A-Za-z0-9-]{1,64})$/);
+    if (conversationItem) {
+        const [projectId, conversationId] = [conversationItem[1], conversationItem[2]];
+        if (!store.readProject(projectId)) return sendJson(res, 404, { error: "not_found" });
+        const cwd = path.join(store.projectsDir, projectId);
+        if (req.method === "DELETE") return sendJson(res, 200, { ok: agent.deleteConversation(projectId, cwd, conversationId) });
+        if (req.method === "PATCH") {
+            let body;
+            try {
+                body = JSON.parse(await readBody(req));
+            } catch (error) {
+                return sendJson(res, 400, { error: "invalid_json", message: error.message });
+            }
+            try {
+                return sendJson(res, 200, { conversation: agent.renameConversation(projectId, cwd, conversationId, body?.title) });
+            } catch (error) {
+                return sendJson(res, 404, { error: "not_found", message: error.message });
+            }
+        }
+        return sendJson(res, 405, { error: "method_not_allowed" });
     }
 
-    if (pathname === "/api/agent/prompt" && req.method === "POST") {
-        let body;
-        try {
-            body = JSON.parse(await readBody(req));
-        } catch (error) {
-            return sendJson(res, 400, { error: "invalid_json", message: error.message });
+    const conversationAction = pathname.match(/^\/api\/projects\/([A-Za-z0-9_-]{1,64})\/agent\/conversations\/([A-Za-z0-9-]{1,64})\/(transcript|prompt|cancel|model)$/);
+    if (conversationAction) {
+        const [projectId, conversationId, action] = [conversationAction[1], conversationAction[2], conversationAction[3]];
+        if (!store.readProject(projectId)) return sendJson(res, 404, { error: "not_found" });
+        const cwd = path.join(store.projectsDir, projectId);
+
+        if (action === "transcript" && req.method === "GET") {
+            return sendJson(res, 200, { transcript: agent.transcript(projectId, cwd, conversationId) });
         }
-        const { projectId, text } = body || {};
-        if (!projectId || !text) return sendJson(res, 400, { error: "missing_fields" });
-        try {
-            await agent.ensureSession(projectId, path.join(store.projectsDir, projectId));
-            await agent.prompt(projectId, text);
+        if (action === "prompt" && req.method === "POST") {
+            let body;
+            try {
+                body = JSON.parse(await readBody(req));
+            } catch (error) {
+                return sendJson(res, 400, { error: "invalid_json", message: error.message });
+            }
+            if (!body?.text) return sendJson(res, 400, { error: "missing_text" });
+            try {
+                await agent.prompt(projectId, cwd, conversationId, String(body.text));
+                return sendJson(res, 200, { ok: true });
+            } catch (error) {
+                return sendJson(res, 400, { error: "agent_prompt_failed", message: error.message });
+            }
+        }
+        if (action === "cancel" && req.method === "POST") {
+            await agent.cancel(projectId, cwd, conversationId).catch(() => undefined);
             return sendJson(res, 200, { ok: true });
-        } catch (error) {
-            return sendJson(res, 400, { error: "agent_prompt_failed", message: error.message });
         }
-    }
-
-    if (pathname === "/api/agent/cancel" && req.method === "POST") {
-        let body;
-        try {
-            body = JSON.parse(await readBody(req));
-        } catch (error) {
-            return sendJson(res, 400, { error: "invalid_json", message: error.message });
+        if (action === "model" && req.method === "POST") {
+            let body;
+            try {
+                body = JSON.parse(await readBody(req));
+            } catch (error) {
+                return sendJson(res, 400, { error: "invalid_json", message: error.message });
+            }
+            try {
+                const configOptions = await agent.setModel(projectId, cwd, conversationId, body?.configId || "model", body?.value);
+                return sendJson(res, 200, { configOptions });
+            } catch (error) {
+                return sendJson(res, 400, { error: "agent_model_failed", message: error.message });
+            }
         }
-        await agent.cancel(body?.projectId).catch(() => undefined);
-        return sendJson(res, 200, { ok: true });
-    }
-
-    if (pathname === "/api/agent/model" && req.method === "POST") {
-        let body;
-        try {
-            body = JSON.parse(await readBody(req));
-        } catch (error) {
-            return sendJson(res, 400, { error: "invalid_json", message: error.message });
-        }
-        try {
-            const configOptions = await agent.setModel(body?.projectId, body?.configId || "model", body?.value);
-            return sendJson(res, 200, { configOptions });
-        } catch (error) {
-            return sendJson(res, 400, { error: "agent_model_failed", message: error.message });
-        }
+        return sendJson(res, 405, { error: "method_not_allowed" });
     }
 
     const permMatch = pathname.match(/^\/api\/agent\/permissions\/([A-Za-z0-9-]{1,64})$/);
