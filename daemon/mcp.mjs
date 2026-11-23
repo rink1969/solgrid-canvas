@@ -182,6 +182,20 @@ const TOOLS = [
         },
     },
     {
+        name: "canvas_write_text",
+        description: "把文本写进一个文本节点（设置 content 并标记 success）。文本生成类任务优先用这个工具，而不是手写 update_node。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                projectId: { type: "string" },
+                nodeId: { type: "string" },
+                text: { type: "string" },
+                title: { type: "string", description: "可选：顺便更新节点标题" },
+            },
+            required: ["projectId", "nodeId", "text"],
+        },
+    },
+    {
         name: "canvas_import_local",
         description: "把本机文件导入项目资产（assets/<sha256>），返回 asset 引用，不创建节点。",
         inputSchema: {
@@ -314,6 +328,17 @@ const HANDLERS = {
 
     async canvas_apply_ops({ projectId, ops, expectRev }) {
         return api(`/api/projects/${projectId}/ops`, { method: "POST", body: JSON.stringify({ ops, expectRev, origin: "agent" }) });
+    },
+
+    async canvas_write_text({ projectId, nodeId, text, title }) {
+        if (typeof text !== "string" || !text.trim()) throw new Error("text 不能为空");
+        const project = await getProject(projectId);
+        const node = project.nodes.find((item) => item.id === nodeId);
+        if (!node) throw new Error(`节点不存在：${nodeId}`);
+        if (node.type !== "text") throw new Error(`不是文本节点：${nodeId}`);
+        const ops = [{ type: "update_node", id: nodeId, patch: { ...(title ? { title } : {}), metadata: { content: text, status: "success", errorDetails: undefined } } }];
+        const result = await api(`/api/projects/${projectId}/ops`, { method: "POST", body: JSON.stringify({ ops, origin: "agent" }) });
+        return { rev: result.rev, nodeId };
     },
 
     async canvas_import_local({ projectId, paths }) {

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
++ [新增] 文本节点改为「用本地 Agent 生成」：节点面板不再显示空模型/未接入提示，点击生成会把 nodeId + 要求发给 Agent，Agent 通过新 MCP 工具 `canvas_write_text` 写回节点；失败/超时会标记节点错误。
+
+
 + [新增] 恢复上游扩展节点：便利贴、Markdown、HTML（以本地插件形式随构建产物发布，默认启用）。
 
 

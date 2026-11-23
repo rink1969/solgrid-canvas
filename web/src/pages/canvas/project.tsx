@@ -2683,9 +2683,55 @@ function InfiniteCanvasPage() {
         [finishGenerationRequest, message, projectId, startGenerationRequest],
     );
 
+    const sendTextToAgent = useCallback(
+        async (node: CanvasNodeData, promptText: string) => {
+            const request = promptText.trim();
+            if (!request) {
+                message.warning("先填写文本生成要求");
+                return;
+            }
+            setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined } } : item)));
+            useAgentStore.getState().openPanel();
+            const instruction = [
+                `请为画布文本节点 ${node.id} 生成内容，并调用 canvas_write_text 写入该节点。`,
+                `projectId=${projectId}，nodeId=${node.id}。只修改这个节点，不要新建节点、不要修改其他节点。`,
+                node.title ? `节点标题：${node.title}` : "",
+                node.metadata?.content ? `节点当前内容（可供改写）：\n${String(node.metadata.content).slice(0, 2000)}` : "",
+                `生成要求：${request}`,
+                "只输出正文内容，不要解释。",
+            ]
+                .filter(Boolean)
+                .join("\n");
+            window.dispatchEvent(new CustomEvent("canvas:agent-request", { detail: { text: instruction, nodeId: node.id } }));
+            // Agent 没写回时给出兜底提示（正常文本生成远快于 3 分钟）
+            window.setTimeout(() => {
+                const current = nodesRef.current.find((item) => item.id === node.id);
+                if (current?.metadata?.status === NODE_STATUS_LOADING) {
+                    setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails: "Agent 未在 3 分钟内写回文本，请检查对话是否报错" } } : item)));
+                }
+            }, 3 * 60 * 1000);
+        },
+        [message, projectId, setNodes],
+    );
+
+    useEffect(() => {
+        const onTextError = (event: Event) => {
+            const detail = (event as CustomEvent<{ nodeId?: string; error?: string }>).detail;
+            if (!detail?.nodeId) return;
+            setNodes((prev) => prev.map((item) => (item.id === detail.nodeId ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails: detail.error || "文本生成失败" } } : item)));
+        };
+        window.addEventListener("canvas:agent-text-error", onTextError);
+        return () => window.removeEventListener("canvas:agent-text-error", onTextError);
+    }, [setNodes]);
+
     const handleGenerateNode = useCallback(
         async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => {
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
+            // 文本节点没有 Solgrid 端点：交给本地 Agent 生成，由 Agent 通过 canvas_write_text 回写
+            if (mode === "text" && sourceNode?.type === CanvasNodeType.Text) {
+                await sendTextToAgent(sourceNode, prompt);
+                return;
+            }
             // 图片/视频一律走 solgrid：节点自己选了模型就用节点的，否则用设置里的默认模型
             if (isSolgridGenerationMode(mode) && sourceNode) {
                 const own = sourceNode.metadata?.provider && sourceNode.metadata?.endpoint ? { provider: sourceNode.metadata.provider, endpoint: sourceNode.metadata.endpoint } : null;

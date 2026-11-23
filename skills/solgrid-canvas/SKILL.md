@@ -21,6 +21,7 @@ description: >
 | `canvas_get_state` | 读画布节点摘要与连线（先读再改） |
 | `canvas_get_node` | 读单个节点及其上下游 |
 | `canvas_apply_ops` | 批量改画布（原子，带 revision） |
+| `canvas_write_text` | 把生成/改写的文本写进文本节点（content + success） |
 | `canvas_place_artifacts` | 把产物放到画布并自动布点 |
 | `canvas_import_local` | 本机文件导入项目资产 |
 | `canvas_list_tools` / `canvas_inspect_tool` | 查平台模型与请求体契约 |
@@ -33,12 +34,13 @@ description: >
 1. **先读后改**：改之前先 `canvas_get_state` 或 `canvas_get_node`，拿到真实节点 id 与 `rev`。
 2. **不要自己算坐标**：需要往画布上放东西时用 `canvas_place_artifacts`（图片一列、文本一列，自动避让）。只有明确要求时才用 `canvas_apply_ops` 手动定位。
 3. **生成前先确认模型**：节点上没选模型时先 `canvas_list_tools` + `canvas_inspect_tool` 确认 provider/endpoint 和参数，再 `canvas_run_nodes`。`canvas_inspect_tool` 会返回 `skeleton`（请求体骨架）；端点没有内置模型族时，把骨架填好后放进 `params.rawBody`（**对象**，不是字符串）再调用。
-4. **生成一定会请求用户审批**：`canvas_run_nodes` 会阻塞等待用户在画布上点“允许”。用户不点或拒绝就不要重试，先把情况告诉用户。
-5. **参考素材**：上游连线节点的资产会自动作为参考图；不要把本地路径硬塞进 params。
-6. **导入路径受限**：`canvas_import_local` / `canvas_place_artifacts` 只接受项目目录、`~/.solgrid-canvas/inbox` 或 `CANVAS_IMPORT_ROOTS` 配置的目录，敏感目录一律拒绝；被拒绝时不要换路径绕过，让用户把文件放进允许目录。
-7. **产物获取**：`canvas_watch_run` 返回 `outputs[].storageKey`（形如 `asset:<projectId>/<sha256>.<ext>`），需要再放到画布上用 `canvas_place_artifacts` 的 `storageKey` 字段。
-8. **失败不静默**：run 状态为 `failed` / `uncertain` 时，把 `error` 转述给用户；`uncertain` 不要自动重跑。
-9. **凭证**：不要读取或传递 solgrid API Key；一切生成由本地 daemon 完成。
+4. **文本生成**：用户要求给文本节点写内容时，调用 `canvas_write_text`（projectId + nodeId + text），不要手写 update_node；只改被要求的节点。
+5. **生成一定会请求用户审批**：`canvas_run_nodes` 会阻塞等待用户在画布上点“允许”。用户不点或拒绝就不要重试，先把情况告诉用户。
+6. **参考素材**：上游连线节点的资产会自动作为参考图；不要把本地路径硬塞进 params。
+7. **导入路径受限**：`canvas_import_local` / `canvas_place_artifacts` 只接受项目目录、`~/.solgrid-canvas/inbox` 或 `CANVAS_IMPORT_ROOTS` 配置的目录，敏感目录一律拒绝；被拒绝时不要换路径绕过，让用户把文件放进允许目录。
+8. **产物获取**：`canvas_watch_run` 返回 `outputs[].storageKey`（形如 `asset:<projectId>/<sha256>.<ext>`），需要再放到画布上用 `canvas_place_artifacts` 的 `storageKey` 字段。
+9. **失败不静默**：run 状态为 `failed` / `uncertain` 时，把 `error` 转述给用户；`uncertain` 不要自动重跑。
+10. **凭证**：不要读取或传递 solgrid API Key；一切生成由本地 daemon 完成。
 
 ## 典型流程
 

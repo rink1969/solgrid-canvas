@@ -146,6 +146,18 @@ try {
     check("apply_ops 生效", !applied.isError && applied.data.rev > state.data.project.rev, JSON.stringify(applied.data));
 
     fs.mkdirSync(path.join(HOME, "inbox"), { recursive: true });
+    const beforeText = await call("canvas_get_state", { projectId: "mcpproj" });
+    const addText = await call("canvas_apply_ops", {
+        projectId: "mcpproj",
+        expectRev: beforeText.data.project.rev,
+        ops: [{ type: "add_node", node: { id: "text1", type: "text", title: "文案", position: { x: 0, y: 700 }, width: 320, height: 160, metadata: { content: "", status: "idle" } } }],
+    });
+    check("新增文本节点", !addText.isError, JSON.stringify(addText.data));
+    const wrote = await call("canvas_write_text", { projectId: "mcpproj", nodeId: "text1", text: "你好，世界" });
+    check("canvas_write_text 写回内容", !wrote.isError, JSON.stringify(wrote.data).slice(0, 160));
+    const textDetail = await call("canvas_get_node", { projectId: "mcpproj", nodeId: "text1" });
+    check("文本节点写入并标记 success", textDetail.data?.node?.metadata?.content === "你好，世界" && textDetail.data?.node?.metadata?.status === "success", JSON.stringify(textDetail.data?.node?.metadata).slice(0, 160));
+
     const pngPath = path.join(HOME, "inbox", "frame.png");
     fs.writeFileSync(pngPath, TINY_PNG);
     const placed = await call("canvas_place_artifacts", {

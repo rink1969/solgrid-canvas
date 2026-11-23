@@ -82,6 +82,7 @@ export function AcpAgentPanel() {
     const [projectsDir, setProjectsDir] = useState("");
     const sendingRef = useRef(false);
     const previousActiveRef = useRef("");
+    const refreshPromiseRef = useRef<Promise<AgentConversation[]> | null>(null);
     const projectRef = useRef(projectId);
     const activeRef = useRef(activeId);
     const storageKey = useMemo(() => `canvas-agent-active-conversation:${projectId}`, [projectId]);
@@ -112,17 +113,27 @@ export function AcpAgentPanel() {
     );
 
     const refreshConversations = useCallback(async () => {
-        const list = await listAgentConversations(projectId);
-        let next = list;
-        if (!next.length) {
-            const created = await createAgentConversation(projectId);
-            next = [created];
+        // 并发调用（打开面板 + 文本生成事件）共用一次请求，避免重复建对话
+        if (refreshPromiseRef.current) return refreshPromiseRef.current;
+        const run = (async () => {
+            const list = await listAgentConversations(projectId);
+            let next = list;
+            if (!next.length) {
+                const created = await createAgentConversation(projectId);
+                next = [created];
+            }
+            setConversations(next);
+            const saved = localStorage.getItem(storageKey);
+            const pick = next.some((item) => item.id === saved) ? (saved as string) : next[0].id;
+            setActiveId((currentId) => (next.some((item) => item.id === currentId) ? currentId : pick));
+            return next;
+        })();
+        refreshPromiseRef.current = run;
+        try {
+            return await run;
+        } finally {
+            refreshPromiseRef.current = null;
         }
-        setConversations(next);
-        const saved = localStorage.getItem(storageKey);
-        const pick = next.some((item) => item.id === saved) ? (saved as string) : next[0].id;
-        setActiveId((currentId) => (next.some((item) => item.id === currentId) ? currentId : pick));
-        return next;
     }, [projectId, storageKey]);
 
     const loadSession = useCallback(async () => {
@@ -249,7 +260,11 @@ export function AcpAgentPanel() {
                 return;
             }
             if (detail.kind === "user") {
-                setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", text: detail.text || "" }]);
+                setMessages((prev) => {
+                    const last = prev[prev.length - 1];
+                    if (last?.role === "user" && last.text === (detail.text || "")) return prev;
+                    return [...prev, { id: `u-${Date.now()}`, role: "user", text: detail.text || "" }];
+                });
                 return;
             }
             if (detail.kind === "done") {
@@ -312,6 +327,63 @@ export function AcpAgentPanel() {
             clearInterval(timer);
         };
     }, [projectId, panelOpen, activeId]);
+
+    const ensureConversation = async () => {
+        if (activeRef.current) return activeRef.current;
+        const list = await refreshConversations();
+        const id = list[0]?.id;
+        if (!id) {
+            const created = await createAgentConversation(projectId);
+            setConversations((prev) => [created, ...prev]);
+            setActiveId(created.id);
+            return created.id;
+        }
+        setActiveId(id);
+        return id;
+    };
+
+    const sendToConversation = async (conversationId: string, text: string, nodeId?: string) => {
+        setPrompt("");
+        useAgentStore.getState().setAgentState({ canvasReferences: [] });
+        setError("");
+        setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", text }]);
+        setSending(true);
+        sendingRef.current = true;
+        try {
+            await sendAgentPrompt(projectId, conversationId, text);
+        } catch (cause) {
+            setSending(false);
+            sendingRef.current = false;
+            const detail = cause instanceof Error ? cause.message : String(cause);
+            setError(detail);
+            if (nodeId) window.dispatchEvent(new CustomEvent("canvas:agent-text-error", { detail: { nodeId, error: detail } }));
+        }
+    };
+
+    // 文本节点「用本地 Agent 生成」：创建/复用对话并自动发送指令
+    useEffect(() => {
+        const handler = async (event: Event) => {
+            const detail = (event as CustomEvent<{ text?: string; nodeId?: string }>).detail;
+            const text = detail?.text;
+            if (!text) return;
+            setTab("chat");
+            if (available === false) {
+                window.dispatchEvent(new CustomEvent("canvas:agent-text-error", { detail: { nodeId: detail?.nodeId, error: "没有可用的本地 Agent" } }));
+                return;
+            }
+            try {
+                const conversationId = await ensureConversation();
+                await sendToConversation(conversationId, text, detail?.nodeId);
+            } catch (cause) {
+                const message = cause instanceof Error ? cause.message : String(cause);
+                setError(message);
+                window.dispatchEvent(new CustomEvent("canvas:agent-text-error", { detail: { nodeId: detail?.nodeId, error: message } }));
+            }
+        };
+        window.addEventListener("canvas:agent-request", handler);
+        return () => window.removeEventListener("canvas:agent-request", handler);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [projectId, available]);
 
     const submit = async () => {
         const text = prompt.trim();
