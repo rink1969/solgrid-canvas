@@ -181,12 +181,13 @@ export function AcpAgentPanel() {
     // 右键「发送到对话」：把节点 marker 插入输入框，效果与 @ 选中的 token 一致
     useEffect(() => {
         const addReference = (event: Event) => {
-            const reference = (event as CustomEvent<{ reference?: CanvasResourceReference }>).detail?.reference;
-            if (!reference) return;
+            const incoming = (event as CustomEvent<{ reference?: CanvasResourceReference }>).detail?.reference;
+            if (!incoming) return;
             const current = useAgentStore.getState().canvasReferences;
-            if (!current.some((item) => item.nodeId === reference.nodeId)) {
-                useAgentStore.getState().setAgentState({ canvasReferences: [...current, reference] });
-            }
+            // 同一节点可能已经有引用（label 不同），复用已有的，保证 marker 与引用列表一致
+            const existing = current.find((item) => item.nodeId === incoming.nodeId);
+            if (!existing) useAgentStore.getState().setAgentState({ canvasReferences: [...current, incoming] });
+            const reference = existing || incoming;
             setPrompt((previous) => {
                 const marker = agentReferenceMarker(reference);
                 if (previous.includes(marker)) return previous;
