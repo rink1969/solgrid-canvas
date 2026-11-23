@@ -81,6 +81,7 @@ export function AcpAgentPanel() {
     const [refreshing, setRefreshing] = useState(false);
     const [projectsDir, setProjectsDir] = useState("");
     const sendingRef = useRef(false);
+    const previousActiveRef = useRef("");
     const projectRef = useRef(projectId);
     const activeRef = useRef(activeId);
     const storageKey = useMemo(() => `canvas-agent-active-conversation:${projectId}`, [projectId]);
@@ -214,10 +215,13 @@ export function AcpAgentPanel() {
     // 切换对话：记录当前选择并加载 transcript
     useEffect(() => {
         if (!activeId) return;
+        const previous = previousActiveRef.current;
+        previousActiveRef.current = activeId;
         localStorage.setItem(storageKey, activeId);
         setSending(false);
         sendingRef.current = false;
-        useAgentStore.getState().setAgentState({ canvasReferences: [] });
+        // 只有真正从 A 切到 B 才清空引用；首次加载（"" -> id）要保留右键发送进来的引用
+        if (previous && previous !== activeId) useAgentStore.getState().setAgentState({ canvasReferences: [] });
         void loadTranscript(activeId).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
     }, [activeId, loadTranscript, storageKey]);
 
