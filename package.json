@@ -16,7 +16,8 @@
         "smoke:agent": "node daemon/smoke-agent.mjs",
         "smoke:video": "node daemon/smoke-video-edit.mjs",
         "start": "node daemon/server.mjs",
-        "setup": "node bin/solgrid-canvas.mjs setup"
+        "setup": "node bin/solgrid-canvas.mjs setup",
+        "build:plugins": "node plugins/canvas/sticky-note/build.mjs && node plugins/canvas/markdown/build.mjs && node plugins/canvas/html/build.mjs"
     },
     "bin": {
         "solgrid-canvas": "bin/solgrid-canvas.mjs"

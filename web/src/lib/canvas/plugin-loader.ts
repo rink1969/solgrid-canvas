@@ -6,6 +6,9 @@ import i18n from "@/i18n";
 
 const cleanups = new Map<string, () => void>();
 
+// 随产品内置的本地插件默认启用（便利贴 / Markdown / HTML）
+const AUTO_ENABLED_LOCAL_PLUGINS = new Set(["sticky-note", "markdown", "html"]);
+
 // A remote plugin may export CanvasPlugin directly or a factory that receives runtime and returns CanvasPlugin.
 // The factory uses runtime.React so the bundle does not need its own React copy.
 async function evaluatePluginSource(source: string): Promise<CanvasPlugin> {
@@ -138,7 +141,7 @@ async function loadLocalPlugins() {
                     description: plugin.description,
                     url,
                     source,
-                    enabled: existing?.enabled ?? false, // Preserve the user setting; new discoveries default to disabled.
+                    enabled: existing?.enabled ?? AUTO_ENABLED_LOCAL_PLUGINS.has(plugin.id), // 内置插件默认启用，其余本地插件默认关闭
                     local: true,
                 });
             } catch (error) {

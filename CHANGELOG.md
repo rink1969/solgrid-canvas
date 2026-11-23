@@ -2,6 +2,9 @@
 
 ## Unreleased
 
++ [新增] 恢复上游扩展节点：便利贴、Markdown、HTML（以本地插件形式随构建产物发布，默认启用）。
+
+
 + [新增] ACP 支持 WorkBuddy：自动探测 CodeBuddy Code CLI（`codebuddy --acp` / `cbc --acp`），不可用时可用 `CANVAS_ACP_COMMAND/ARGS` 指定；不接受 MCP 注入的实现会自动退化为纯对话。
 + [文档] AI_SETUP 增加 WorkBuddy/CodeBuddy 的 MCP 与 ACP 配置说明。
 
