@@ -53,7 +53,7 @@ import { ApprovalCenter } from "@/components/canvas/approval-center";
 import { useAgentStore } from "@/stores/use-agent-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { usePluginHost } from "@/pages/canvas/hooks/use-plugin-host";
-import { buildNodeMentionReferences, getGroupResourceNodes, isCanvasReferenceNode, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import { buildCanvasResourceReferences, buildNodeMentionReferences, getGroupResourceNodes, isCanvasReferenceNode, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
 import { applyNodeConfigPatch, audioMetadata, buildAudioGenerationMetadata, buildImageGenerationMetadata, createCanvasNode, imageMetadata, videoMetadata } from "@/lib/canvas/canvas-node-factory";
 import { applyGroupSelection, applyUngroupSelection, canGroupSelectedNodes, canUngroupSelectedNodes, collectGroupMemberNodes, findContainingGroupId, findGroupDropTarget, focusViewportForNode, getConnectionTargetAnchor, getGroupWrapRect, normalizeConnection, snapNodesIntoGroup } from "@/lib/canvas/canvas-node-geometry";
@@ -936,6 +936,20 @@ function InfiniteCanvasPage() {
         setNodes,
         setDialogNodeId,
     });
+    const sendNodeToAgent = useCallback((nodeId: string) => {
+        const node = nodesRef.current.find((item) => item.id === nodeId);
+        if (!node) return;
+        const [reference] = buildCanvasResourceReferences([node]);
+        if (!reference) return;
+        const current = useAgentStore.getState().canvasReferences;
+        if (!current.some((item) => item.nodeId === reference.nodeId)) {
+            useAgentStore.getState().setAgentState({ canvasReferences: [...current, reference] });
+        }
+        useAgentStore.getState().openPanel();
+        window.dispatchEvent(new CustomEvent("canvas:agent-focus-chat"));
+        setContextMenu(null);
+    }, []);
+
     const createNode = useCallback(
         (type: CanvasNodeTypeId, position?: Position) => {
             const targetPosition = position || getCanvasCenter();
@@ -3792,6 +3806,7 @@ function InfiniteCanvasPage() {
                         canCaptureVideoFrame={contextMenuNode?.type === CanvasNodeType.Video && Boolean(contextMenuNode.metadata?.content)}
                         canGroup={contextMenu.type === "node" && canGroupSelection}
                         canUngroup={contextMenu.type === "node" && canUngroupSelection}
+                        onSendToAgent={contextMenu.type === "node" ? () => sendNodeToAgent(contextMenu.nodeId) : undefined}
                         onClose={() => setContextMenu(null)}
                         onCaptureVideoFrame={(position) => {
                             if (contextMenu.type !== "node") return;

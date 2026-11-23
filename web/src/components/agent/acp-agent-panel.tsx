@@ -6,6 +6,8 @@ import dayjs from "dayjs";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { daemonApi } from "@/services/api/daemon";
+import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
+import { promptWithCanvasReferences } from "./agent-event-formatters";
 import {
     cancelAgentPrompt,
     createAgentConversation,
@@ -146,6 +148,33 @@ export function AcpAgentPanel() {
         void loadSession();
     }, [panelOpen, loadSession]);
 
+    const canvasProject = useCanvasStore((state) => state.projects.find((item) => item.id === projectId));
+
+    // 把当前画布快照喂给 @ 引用候选列表（之前 canvasContext 为空，@ 列表是空的）
+    useEffect(() => {
+        if (!panelOpen || !canvasProject) return;
+        const snapshot = {
+            projectId,
+            title: canvasProject.title || "",
+            nodes: canvasProject.nodes,
+            connections: canvasProject.connections,
+            selectedNodeIds: [] as string[],
+            viewport: canvasProject.viewport,
+        };
+        useAgentStore.getState().setCanvasContext({
+            snapshot,
+            applyOps: () => snapshot,
+            undoOps: () => null,
+            canUndo: false,
+        });
+    }, [panelOpen, projectId, canvasProject, canvasProject?.nodes, canvasProject?.connections]);
+
+    useEffect(() => {
+        const focusChat = () => setTab("chat");
+        window.addEventListener("canvas:agent-focus-chat", focusChat);
+        return () => window.removeEventListener("canvas:agent-focus-chat", focusChat);
+    }, []);
+
     useEffect(() => {
         if (!panelOpen) return;
         let alive = true;
@@ -166,6 +195,7 @@ export function AcpAgentPanel() {
         localStorage.setItem(storageKey, activeId);
         setSending(false);
         sendingRef.current = false;
+        useAgentStore.getState().setAgentState({ canvasReferences: [] });
         void loadTranscript(activeId).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
     }, [activeId, loadTranscript, storageKey]);
 
@@ -258,14 +288,17 @@ export function AcpAgentPanel() {
 
     const submit = async () => {
         const text = prompt.trim();
-        if (!text || sending || !projectId || !activeId) return;
+        const references = useAgentStore.getState().canvasReferences;
+        if ((!text && !references.length) || sending || !projectId || !activeId) return;
         setPrompt("");
         setError("");
-        setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", text }]);
+        const finalPrompt = promptWithCanvasReferences(text, references);
+        setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", text: finalPrompt }]);
         setSending(true);
         sendingRef.current = true;
         try {
-            await sendAgentPrompt(projectId, activeId, text);
+            await sendAgentPrompt(projectId, activeId, finalPrompt);
+            useAgentStore.getState().setAgentState({ canvasReferences: [] });
         } catch (cause) {
             setSending(false);
             sendingRef.current = false;
