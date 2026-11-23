@@ -80,6 +80,9 @@ try {
         }),
     });
 
+    const meta = await fetch(`${BASE}/api/meta`, { headers }).then((r) => r.json());
+    check("meta 返回资产目录", typeof meta.projectsDir === "string" && meta.projectsDir.includes("projects"), JSON.stringify(meta).slice(0, 120));
+
     // 提交 run
     const created = await fetch(`${BASE}/api/runs`, {
         method: "POST",

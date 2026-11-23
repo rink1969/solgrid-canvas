@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { App, Modal, Segmented, Tooltip } from "antd";
-import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Plus, RefreshCw, Scissors, Settings2, Trash2, Ungroup, Upload, Video } from "lucide-react";
+import { Copy, Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Plus, RefreshCw, Scissors, Settings2, Trash2, Ungroup, Upload, Video } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { canvasThemes } from "@/lib/canvas-theme";
+import { daemonApi } from "@/services/api/daemon";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
 import { formatBytes, getDataUrlByteSize } from "@/lib/image-utils";
 import { useCopyText } from "@/hooks/use-copy-text";
@@ -222,7 +223,9 @@ export function CanvasNodeHoverToolbar({
 export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeData | null; open: boolean; onClose: () => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
+    const { message } = App.useApp();
     const [view, setView] = useState<"info" | "json">("info");
+    const [projectsDir, setProjectsDir] = useState("");
     const imageBytes = node?.type === CanvasNodeType.Image && node.metadata?.content ? getDataUrlByteSize(node.metadata.content) : 0;
     const batchCount = node?.type === CanvasNodeType.Image ? node.metadata?.images?.length || 0 : 0;
     const json = useMemo(() => {
@@ -242,6 +245,42 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
     useEffect(() => {
         if (open) setView("info");
     }, [node?.id, open]);
+
+    useEffect(() => {
+        if (!open) return;
+        let alive = true;
+        void daemonApi
+            .getMeta()
+            .then((meta) => {
+                if (alive) setProjectsDir(meta.projectsDir || "");
+            })
+            .catch(() => undefined);
+        return () => {
+            alive = false;
+        };
+    }, [open]);
+
+    const localPaths = useMemo(() => {
+        if (!node || !projectsDir) return [];
+        const keys = [node.metadata?.storageKey, ...(node.metadata?.images || []).map((item) => item.storageKey)];
+        const unique = [...new Set(keys.filter((key): key is string => typeof key === "string" && key.startsWith("asset:")))];
+        const separator = projectsDir.includes("\\") ? "\\" : "/";
+        return unique.map((key) => {
+            const rest = key.slice("asset:".length);
+            const slash = rest.indexOf("/");
+            if (slash <= 0) return "";
+            const project = rest.slice(0, slash);
+            const file = rest.slice(slash + 1).replace(/\//g, separator);
+            return `${projectsDir.replace(/[\\/]+$/, "")}${separator}${project}${separator}assets${separator}${file}`;
+        }).filter(Boolean);
+    }, [node, projectsDir]);
+
+    const copyPath = (path: string) => {
+        void navigator.clipboard.writeText(path).then(
+            () => message.success(t("canvas.nodeToolbar.pathCopied")),
+            () => message.error(t("canvas.nodeToolbar.pathCopyFailed")),
+        );
+    };
 
     const title = (
         <div className="flex items-center justify-between gap-4 pr-12">
@@ -274,6 +313,23 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
                             {node.metadata?.prompt ? <InfoRow label={t("canvas.configNode.prompt")} value={node.metadata.prompt} /> : null}
                             {node.metadata?.videoTaskId ? <InfoRow label={t("canvas.nodeToolbar.videoTaskId")} value={node.metadata.videoTaskId} /> : null}
                             {imageBytes ? <InfoRow label={t("canvas.nodeToolbar.imageSize")} value={formatBytes(imageBytes)} /> : null}
+                            {localPaths.length ? (
+                                <InfoRow
+                                    label={t("canvas.nodeToolbar.localPath")}
+                                    value={
+                                        <div className="space-y-1">
+                                            {localPaths.map((path) => (
+                                                <div key={path} className="flex items-start gap-2">
+                                                    <code className="min-w-0 flex-1 break-all rounded bg-black/[.04] px-1.5 py-0.5 font-mono text-[11px] dark:bg-white/[.06]">{path}</code>
+                                                    <button type="button" className="shrink-0 opacity-60 hover:opacity-100" onClick={() => copyPath(path)} title={t("canvas.nodeToolbar.copyPath")} aria-label={t("canvas.nodeToolbar.copyPath")}>
+                                                        <Copy className="size-3.5" />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    }
+                                />
+                            ) : null}
                             {node.metadata?.errorDetails ? (
                                 <div className="rounded-lg border p-3 text-red-400" style={{ borderColor: theme.node.stroke }}>
                                     {node.metadata.errorDetails}

@@ -40,7 +40,10 @@ export type CanvasOp =
     | { type: "update_meta"; patch: Record<string, unknown> }
     | { type: "move_nodes"; ids: string[]; dx: number; dy: number };
 
+export type DaemonMeta = { root: string; projectsDir: string; version: string };
+
 export const daemonApi = {
+    getMeta: (): Promise<DaemonMeta> => request<DaemonMeta>("/meta"),
     listProjects: (): Promise<CanvasProject[]> => request<{ projects: CanvasProject[] }>("/projects").then((value) => value.projects),
     getProject: (id: string): Promise<CanvasProject> => request<{ project: CanvasProject }>(`/projects/${id}`).then((value) => value.project),
     putProject: (id: string, project: CanvasProject): Promise<{ rev: number }> =>

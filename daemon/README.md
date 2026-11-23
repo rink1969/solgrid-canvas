@@ -83,6 +83,10 @@ node bin/solgrid-canvas.mjs install --agent codex|claude|dsh
 
 注册的是 stdio MCP：`node daemon/mcp.mjs`。它不重复实现业务，全部转发给 daemon；daemon 没起时会自动拉起。工具包括 `canvas_get_state` / `canvas_apply_ops` / `canvas_place_artifacts` / `canvas_import_local` / `canvas_run_nodes` / `canvas_watch_run` / `canvas_cancel_run` 等。
 
+## 元信息
+
+`GET /api/meta` 返回 `{ root, projectsDir, version }`，前端用它把 `asset:<project>/<file>` 还原成本机文件路径（节点信息面板展示/复制）。
+
 ## rawBody 契约
 
 - 画布文档里 `metadata.rawBody` 是 **JSON 字符串**（编辑器文本）；daemon 的 `params.rawBody` 是 **对象**。

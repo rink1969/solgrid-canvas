@@ -220,6 +220,10 @@ async function handle(req, res) {
         return;
     }
 
+    if (pathname === "/api/meta" && req.method === "GET") {
+        return sendJson(res, 200, { root: ROOT, projectsDir: store.projectsDir, version: VERSION });
+    }
+
     // 项目列表（M0 直接返回完整文档：文档不含二进制，通常只有几十 KB）
     if (pathname === "/api/projects" && req.method === "GET") {
         sendJson(res, 200, { projects: store.listProjects() });
