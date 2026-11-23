@@ -47,17 +47,27 @@ export function resolveAdapter() {
     // 1) DSH CLI（npm 全局）：web/tui profile 用户走这条（用 shell 探测，兼容 .cmd 与不同 shell 的 PATH）
     const probe = spawnSync("dsh", ["--version"], { shell: true, encoding: "utf8", timeout: 8000, windowsHide: true });
     if (probe.status === 0) return { id: "dsh-cli", command: "dsh", args: ["--profile", "acp"], env: {}, shell: true };
+
+    // 2) WorkBuddy：其 ACP 能力由 CodeBuddy Code CLI 提供（codebuddy --acp，部分安装是 cbc）
+    for (const name of ["codebuddy", "cbc"]) {
+        const found = findCommand(name);
+        if (!found) continue;
+        const version = spawnSync(process.platform === "win32" ? `"${found}"` : found, ["--version"], { shell: true, encoding: "utf8", timeout: 8000, windowsHide: true });
+        if (version.status === 0) {
+            return { id: "workbuddy", command: process.platform === "win32" ? `"${found}"` : found, args: ["--acp"], env: {}, shell: process.platform === "win32" };
+        }
+    }
     const dshCli = findCommand("dsh");
     if (dshCli) {
         return { id: "dsh-cli", command: process.platform === "win32" ? `"${dshCli}"` : dshCli, args: ["--profile", "acp"], env: {}, shell: process.platform === "win32" };
     }
-    // 2) 当前进程是从 DSH 内部启动的：环境变量里带可执行文件与安装目录
+    // 3) 当前进程是从 DSH 内部启动的：环境变量里带可执行文件与安装目录
     const dshNode = process.env.DSH_NODE_EXECUTABLE;
     const dshBin = process.env.DSH_INSTALL_DIR ? path.join(process.env.DSH_INSTALL_DIR, "lib", "bin.js") : "";
     if (dshNode && dshBin && fs.existsSync(dshBin)) {
         return { id: "dsh", command: dshNode, args: [dshBin, "--profile", "acp"], env: { ELECTRON_RUN_AS_NODE: "1" } };
     }
-    // 3) DSH 桌面版默认安装位置
+    // 4) DSH 桌面版默认安装位置
     const exe = process.env.CANVAS_DSH_EXE || defaultDshExe();
     const bin = path.join(path.dirname(exe), "resources", "app.asar", "dsh", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
     // bin 在 app.asar 内，普通 node 的 existsSync 看不到；只要 exe 在就交给 Electron 去解析
@@ -303,7 +313,14 @@ export function createAgentManager({ broadcast, log }) {
                     }
                 }
                 if (!sessionId) {
-                    const result = await client.request("session/new", { cwd, mcpServers: [mcpEntry()] });
+                    let result;
+                    try {
+                        result = await client.request("session/new", { cwd, mcpServers: [mcpEntry()] });
+                    } catch (error) {
+                        // 有些 ACP 实现（如 CodeBuddy）不接受 mcpServers 注入，退化为纯对话
+                        log(`[acp] 会话不接受 MCP 注入，改为不带 MCP 重试：${error.message}`);
+                        result = await client.request("session/new", { cwd });
+                    }
                     sessionId = result.sessionId;
                     configOptions = result.configOptions || [];
                 }

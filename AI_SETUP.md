@@ -124,6 +124,7 @@ node bin/solgrid-canvas.mjs setup
 | Claude Code | `claude --version` 可用 | `node bin/solgrid-canvas.mjs install --agent claude` |
 | Codex CLI | `codex --version` 可用 | `node bin/solgrid-canvas.mjs install --agent codex` |
 | DeepSeek Harness（DSH） | 环境变量 `DSH_PROFILE` 存在，或 `~/.dsh/profiles/` 有内容 | `node bin/solgrid-canvas.mjs install --agent dsh --profile <你的 profile>` |
+| WorkBuddy / CodeBuddy | `codebuddy --version` 或 `cbc --version` 可用 | 在 WorkBuddy/CodeBuddy 的 MCP 设置里添加下方通用配置 |
 | 其他 MCP 客户端 | 在设置里手写 JSON | 见下方通用配置 |
 
 注册后**重启你自己**（或新开会话），使 MCP 工具生效。工具名前缀为 `mcp__solgrid_canvas__canvas_*`。
@@ -195,6 +196,18 @@ node bin/solgrid-canvas.mjs sync-config --from <profile> --profile acp
   3. DSH 桌面版默认安装路径（Electron node 模式）
 
   都不匹配时可用 `CANVAS_DSH_EXE` 指定桌面版可执行文件。
+- **WorkBuddy**：WorkBuddy 桌面版本身不提供独立的 ACP 命令，ACP 能力由 **CodeBuddy Code CLI** 提供（参考 [WorkBuddy ACP 文档](https://www.workbuddy.ai/docs/enterprise/222639541005807616) / [CodeBuddy ACP 文档](https://www.codebuddy.ai/docs/zh/cli/acp)）。daemon 会按顺序探测：
+  1. `codebuddy --acp`
+  2. `cbc --acp`（部分安装的别名）
+
+  探测到后直接用，不需要额外配置。若 `codebuddy` 不在 PATH（例如未安装 CodeBuddy CLI），可手动指定：
+
+  ```bash
+  CANVAS_ACP_COMMAND="C:\\path\\to\\codebuddy.cmd"
+  CANVAS_ACP_ARGS='["--acp"]'
+  ```
+
+  > 部分 ACP 实现不接受 `session/new` 里的 MCP 注入；daemon 会自动去掉 MCP 重试。这种情况下 WorkBuddy 仍能对话，但看不到 `canvas_*` 工具（Agent 操作画布请用支持 MCP 的客户端，或改用 DSH）。
 - **其他 Agent**：需要对应的 ACP 适配器，通过环境变量指定（启动 daemon 前设置）：
   ```bash
   # 示例（以实际安装的适配器为准）
@@ -240,7 +253,8 @@ Agent 完成后请逐项确认并汇报：
 | 生成报 `solgrid_unavailable` / 未登录 | 让用户在其终端登录 solgrid；`solgrid --version` 只能证明已安装 |
 | 生成报「没有默认模型」 | 设置 → 渠道里选默认生图/生视频模型；或在节点上单独选模型 |
 | 视频片段重生成失败 | 检查 `ffmpeg`/`ffprobe` 是否在 PATH；`doctor` 有对应项 |
-| 画布 Agent 面板显示不可用 | 非 DSH Agent 需要配置 `CANVAS_ACP_COMMAND/ARGS`；DSH 需确认桌面版路径存在 |
+| 画布 Agent 面板显示不可用 | WorkBuddy：确认 `codebuddy --version` 可用，否则安装 CodeBuddy Code CLI 或配置 `CANVAS_ACP_COMMAND/ARGS`；DSH：确认桌面版路径存在 |
+| WorkBuddy 对话可用但没有画布工具 | 该 ACP 实现可能不支持 `mcpServers` 注入；检查 daemon 日志是否有「改为不带 MCP 重试」 |
 | Windows 上 build 权限报错 | 把 `TMP`/`TEMP` 指到仓库内目录（见第 3 节） |
 
 日志位置：

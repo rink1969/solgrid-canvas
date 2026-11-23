@@ -52,6 +52,9 @@ async function doctor() {
     }
     checks.push([online, `daemon：${online ? `http://127.0.0.1:${PORT}` : "未运行（solgrid-canvas daemon）"}`]);
 
+    const workbuddy = spawnSync("codebuddy", ["--version"], { shell: true, encoding: "utf8", timeout: 8000 });
+    if (workbuddy.status === 0) checks.push([true, "WorkBuddy / CodeBuddy CLI：可用（ACP 适配）"]);
+
     const ffmpeg = spawnSync("ffmpeg", ["-version"], { encoding: "utf8" });
     checks.push([ffmpeg.status === 0, `ffmpeg：${ffmpeg.status === 0 ? "可用（时间线导出需要）" : "未找到（可选）"}`]);
 

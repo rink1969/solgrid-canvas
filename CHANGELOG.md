@@ -2,6 +2,10 @@
 
 ## Unreleased
 
++ [新增] ACP 支持 WorkBuddy：自动探测 CodeBuddy Code CLI（`codebuddy --acp` / `cbc --acp`），不可用时可用 `CANVAS_ACP_COMMAND/ARGS` 指定；不接受 MCP 注入的实现会自动退化为纯对话。
++ [文档] AI_SETUP 增加 WorkBuddy/CodeBuddy 的 MCP 与 ACP 配置说明。
+
+
 + [修复] 右键「发送到对话」后引用显示成纯文本：首次加载当前对话时不再清空刚加入的引用，只有真正切换对话才清空。
 
 
