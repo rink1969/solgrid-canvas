@@ -23,6 +23,8 @@ import {
     type AgentTranscriptItem,
 } from "@/services/api/agent";
 import { useAgentStore, type AgentChatItem, type AgentModel } from "@/stores/use-agent-store";
+import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import { agentReferenceMarker } from "./agent-chat-inline-tokens";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { AgentChatTimeline } from "./agent-chat";
 import { AgentChatComposer } from "./agent-chat-composer";
@@ -173,6 +175,26 @@ export function AcpAgentPanel() {
         const focusChat = () => setTab("chat");
         window.addEventListener("canvas:agent-focus-chat", focusChat);
         return () => window.removeEventListener("canvas:agent-focus-chat", focusChat);
+    }, []);
+
+    // 右键「发送到对话」：把节点 marker 插入输入框，效果与 @ 选中的 token 一致
+    useEffect(() => {
+        const addReference = (event: Event) => {
+            const reference = (event as CustomEvent<{ reference?: CanvasResourceReference }>).detail?.reference;
+            if (!reference) return;
+            const current = useAgentStore.getState().canvasReferences;
+            if (!current.some((item) => item.nodeId === reference.nodeId)) {
+                useAgentStore.getState().setAgentState({ canvasReferences: [...current, reference] });
+            }
+            setPrompt((previous) => {
+                const marker = agentReferenceMarker(reference);
+                if (previous.includes(marker)) return previous;
+                return `${previous}${previous && !/\s$/.test(previous) ? " " : ""}${marker} `;
+            });
+            setTab("chat");
+        };
+        window.addEventListener("canvas:agent-reference", addReference);
+        return () => window.removeEventListener("canvas:agent-reference", addReference);
     }, []);
 
     useEffect(() => {

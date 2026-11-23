@@ -947,6 +947,7 @@ function InfiniteCanvasPage() {
         }
         useAgentStore.getState().openPanel();
         window.dispatchEvent(new CustomEvent("canvas:agent-focus-chat"));
+        window.dispatchEvent(new CustomEvent("canvas:agent-reference", { detail: { reference } }));
         setContextMenu(null);
     }, []);
 
