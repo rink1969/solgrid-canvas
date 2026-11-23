@@ -335,14 +335,19 @@ export function AcpAgentPanel() {
         if (!id) {
             const created = await createAgentConversation(projectId);
             setConversations((prev) => [created, ...prev]);
+            activeRef.current = created.id;
             setActiveId(created.id);
             return created.id;
         }
+        activeRef.current = id;
         setActiveId(id);
         return id;
     };
 
     const sendToConversation = async (conversationId: string, text: string, nodeId?: string) => {
+        // 先切到目标对话，确保紧随其后的 SSE 流能被当前面板接收
+        activeRef.current = conversationId;
+        setActiveId(conversationId);
         setPrompt("");
         useAgentStore.getState().setAgentState({ canvasReferences: [] });
         setError("");
