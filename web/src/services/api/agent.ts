@@ -22,6 +22,7 @@ export type AgentTranscriptItem = {
 export type AgentConversation = {
     id: string;
     title: string;
+    preview?: string;
     createdAt?: string;
     updatedAt?: string;
     running?: boolean;

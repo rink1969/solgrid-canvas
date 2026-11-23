@@ -232,6 +232,7 @@ export function createAgentManager({ broadcast, log }) {
                 const conversation = {
                     id: crypto.randomUUID(),
                     title: String(title || "").trim() || "新对话",
+                    preview: "",
                     sessionId: null,
                     configOptions: [],
                     createdAt: new Date().toISOString(),
@@ -335,6 +336,7 @@ export function createAgentManager({ broadcast, log }) {
                 runtime.running = true;
                 const conversation = findConversation(projectId, cwd, conversationId);
                 if (!conversation.title || conversation.title === "新对话") conversation.title = String(text).slice(0, 24);
+                conversation.preview = String(text).slice(0, 80);
                 conversation.updatedAt = new Date().toISOString();
                 saveConversations(projectId);
 
@@ -463,6 +465,7 @@ export function createAgentManager({ broadcast, log }) {
         return {
             id: conversation.id,
             title: conversation.title,
+            preview: conversation.preview || "",
             createdAt: conversation.createdAt,
             updatedAt: conversation.updatedAt,
             running: Boolean(runtime?.running),

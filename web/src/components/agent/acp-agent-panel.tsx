@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { App, Button, Modal, Tag, Tooltip } from "antd";
-import { Bot, MessageSquarePlus, PanelRightClose, Trash2 } from "lucide-react";
+import { App, Button, Modal, Segmented, Tag } from "antd";
+import { Bot, Folder, History, MessageSquare, PanelRightClose, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useMatch } from "react-router-dom";
+import dayjs from "dayjs";
 
 import { canvasThemes } from "@/lib/canvas-theme";
+import { daemonApi } from "@/services/api/daemon";
 import {
     cancelAgentPrompt,
     createAgentConversation,
@@ -71,6 +73,9 @@ export function AcpAgentPanel() {
     const [adapter, setAdapter] = useState<string | null>(null);
     const [error, setError] = useState("");
     const [permission, setPermission] = useState<{ id: string; title?: string } | null>(null);
+    const [tab, setTab] = useState<"chat" | "history">("chat");
+    const [refreshing, setRefreshing] = useState(false);
+    const [projectsDir, setProjectsDir] = useState("");
     const sendingRef = useRef(false);
     const projectRef = useRef(projectId);
     const activeRef = useRef(activeId);
@@ -80,6 +85,7 @@ export function AcpAgentPanel() {
     const configOptions = active?.configOptions || [];
     const { models, current } = useMemo(() => modelOf(configOptions), [configOptions]);
     const currentModelName = models.find((item) => item.id === current)?.model || models[0]?.model || "";
+    const projectPath = projectsDir ? `${projectsDir.replace(/[\\/]+$/, "")}${projectsDir.includes("\\") ? "\\" : "/"}${projectId}` : "";
 
     useEffect(() => {
         projectRef.current = projectId;
@@ -139,6 +145,20 @@ export function AcpAgentPanel() {
         if (!panelOpen) return;
         void loadSession();
     }, [panelOpen, loadSession]);
+
+    useEffect(() => {
+        if (!panelOpen) return;
+        let alive = true;
+        void daemonApi
+            .getMeta()
+            .then((meta) => {
+                if (alive) setProjectsDir(meta.projectsDir || "");
+            })
+            .catch(() => undefined);
+        return () => {
+            alive = false;
+        };
+    }, [panelOpen]);
 
     // 切换对话：记录当前选择并加载 transcript
     useEffect(() => {
@@ -267,6 +287,17 @@ export function AcpAgentPanel() {
         }
     };
 
+    const refreshList = async () => {
+        setRefreshing(true);
+        try {
+            await refreshConversations();
+        } catch (cause) {
+            setError(cause instanceof Error ? cause.message : String(cause));
+        } finally {
+            setRefreshing(false);
+        }
+    };
+
     const newConversation = async () => {
         if (!projectId) return;
         try {
@@ -275,6 +306,7 @@ export function AcpAgentPanel() {
             setActiveId(created.id);
             setMessages([]);
             setError("");
+            setTab("chat");
         } catch (cause) {
             setError(cause instanceof Error ? cause.message : String(cause));
         }
@@ -316,71 +348,118 @@ export function AcpAgentPanel() {
                     {adapter || "未连接"}
                 </Tag>
                 <div className="ml-auto flex items-center gap-1">
+                    <Segmented
+                        size="small"
+                        value={tab}
+                        onChange={(value) => setTab(value as "chat" | "history")}
+                        options={[
+                            { value: "chat", label: <span className="flex items-center gap-1"><MessageSquare className="size-3.5" />对话</span> },
+                            { value: "history", label: <span className="flex items-center gap-1"><History className="size-3.5" />历史{conversations.length ? ` ${conversations.length}` : ""}</span> },
+                        ]}
+                    />
                     <Button size="small" type="text" icon={<PanelRightClose className="size-4" />} onClick={closePanel} aria-label="关闭" />
                 </div>
             </div>
 
-            <div className="thin-scrollbar flex items-center gap-1 overflow-x-auto px-2 py-1" style={{ borderBottom: `1px solid ${theme.node.stroke}` }}>
-                {conversations.map((conversation) => (
-                    <button
-                        key={conversation.id}
-                        type="button"
-                        className="flex min-w-0 max-w-[150px] shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs transition"
-                        style={{
-                            background: conversation.id === activeId ? theme.toolbar.activeBg : "transparent",
-                            color: conversation.id === activeId ? theme.toolbar.activeText : theme.node.muted,
-                        }}
-                        title={conversation.title}
-                        onClick={() => setActiveId(conversation.id)}
-                    >
-                        {conversation.running ? <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" /> : null}
-                        <span className="truncate">{conversation.title || "新对话"}</span>
-                    </button>
-                ))}
-                <Tooltip title="新建对话">
-                    <button type="button" className="grid size-6 shrink-0 place-items-center rounded-md opacity-60 hover:opacity-100" onClick={() => void newConversation()} aria-label="新建对话">
-                        <MessageSquarePlus className="size-3.5" />
-                    </button>
-                </Tooltip>
-                {activeId ? (
-                    <Tooltip title="删除当前对话">
-                        <button type="button" className="ml-auto grid size-6 shrink-0 place-items-center rounded-md text-rose-500 opacity-60 hover:opacity-100" onClick={() => removeConversation(activeId)} aria-label="删除当前对话">
-                            <Trash2 className="size-3.5" />
-                        </button>
-                    </Tooltip>
-                ) : null}
-            </div>
-
-            {available === false ? (
-                <div className="mx-3 rounded-lg bg-stone-100 p-3 text-xs text-stone-600 dark:bg-stone-900 dark:text-stone-300">
-                    没有找到可用的 ACP Agent。目前支持 DSH 桌面版；也可以用环境变量 <code>CANVAS_ACP_COMMAND</code> / <code>CANVAS_ACP_ARGS</code> 指定别的适配器。
+            {tab === "history" ? (
+                <div className="flex min-h-0 flex-1 flex-col">
+                    <div className="flex items-center gap-2 px-3 py-2 text-xs" style={{ borderBottom: `1px solid ${theme.node.stroke}` }}>
+                        <Folder className="size-3.5 shrink-0 opacity-60" />
+                        <span className="truncate opacity-70" title={projectPath}>工作空间 {projectPath || "…"}</span>
+                    </div>
+                    <div className="flex items-center justify-between px-3 py-1.5">
+                        <span className="text-xs opacity-60">{conversations.length} 条历史</span>
+                        <div className="flex items-center gap-1">
+                            <Button size="small" type="text" icon={<RefreshCw className="size-3.5" />} loading={refreshing} onClick={() => void refreshList()}>
+                                刷新
+                            </Button>
+                            <Button size="small" type="primary" icon={<Plus className="size-3.5" />} onClick={() => void newConversation()}>
+                                新对话
+                            </Button>
+                        </div>
+                    </div>
+                    <div className="thin-scrollbar min-h-0 flex-1 space-y-1 overflow-y-auto px-2 pb-2">
+                        {conversations.map((conversation) => (
+                            <div
+                                key={conversation.id}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => {
+                                    setActiveId(conversation.id);
+                                    setTab("chat");
+                                }}
+                                onKeyDown={(event) => {
+                                    if (event.key === "Enter" || event.key === " ") {
+                                        event.preventDefault();
+                                        setActiveId(conversation.id);
+                                        setTab("chat");
+                                    }
+                                }}
+                                className="group relative w-full cursor-pointer rounded-lg border px-3 py-2 text-left transition hover:bg-black/[.03] dark:hover:bg-white/[.04]"
+                                style={{ borderColor: conversation.id === activeId ? theme.toolbar.activeBg : theme.node.stroke }}
+                            >
+                                <div className="flex items-center gap-2">
+                                    <span className="min-w-0 flex-1 truncate text-sm font-medium">{conversation.title || "新对话"}</span>
+                                    {conversation.id === activeId ? (
+                                        <Tag className="!m-0" color="blue">
+                                            当前
+                                        </Tag>
+                                    ) : null}
+                                    <span className="shrink-0 text-[11px] opacity-50">{formatConversationTime(conversation.updatedAt)}</span>
+                                </div>
+                                {conversation.preview ? <div className="mt-0.5 truncate text-xs opacity-55">{conversation.preview}</div> : null}
+                                <button
+                                    type="button"
+                                    className="absolute bottom-2 right-2 hidden rounded p-1 text-rose-500 group-hover:block"
+                                    onClick={(event) => {
+                                        event.stopPropagation();
+                                        removeConversation(conversation.id);
+                                    }}
+                                    aria-label="删除对话"
+                                >
+                                    <Trash2 className="size-3.5" />
+                                </button>
+                            </div>
+                        ))}
+                        {!conversations.length ? <div className="px-3 py-8 text-center text-xs opacity-50">还没有对话，点「新对话」开始</div> : null}
+                    </div>
                 </div>
-            ) : null}
+            ) : (
+                <>
+                    {available === false ? (
+                        <div className="mx-3 rounded-lg bg-stone-100 p-3 text-xs text-stone-600 dark:bg-stone-900 dark:text-stone-300">
+                            没有找到可用的 ACP Agent。目前支持 DSH 桌面版；也可以用环境变量 <code>CANVAS_ACP_COMMAND</code> / <code>CANVAS_ACP_ARGS</code> 指定别的适配器。
+                        </div>
+                    ) : null}
 
-            {!projectId ? (
-                <div className="mx-3 rounded-lg bg-stone-100 p-3 text-xs text-stone-600 dark:bg-stone-900 dark:text-stone-300">打开一个画布项目后，Agent 会跟随这个项目工作。</div>
-            ) : null}
+                    {!projectId ? (
+                        <div className="mx-3 rounded-lg bg-stone-100 p-3 text-xs text-stone-600 dark:bg-stone-900 dark:text-stone-300">打开一个画布项目后，Agent 会跟随这个项目工作。</div>
+                    ) : null}
 
-            <AgentChatTimeline theme={theme} pendingTool={null} pendingApprovals={[]} sending={sending} waiting={sending} onRejectTool={() => undefined} onApproveTool={() => undefined} onApprovalDecision={() => undefined} />
+                    {active ? <div className="truncate px-3 pt-1 text-[11px] opacity-50">{active.title}</div> : null}
 
-            {error ? <div className="px-3 pb-1 text-xs text-red-500">{error}</div> : null}
+                    <AgentChatTimeline theme={theme} pendingTool={null} pendingApprovals={[]} sending={sending} waiting={sending} onRejectTool={() => undefined} onApproveTool={() => undefined} onApprovalDecision={() => undefined} />
 
-            <AgentChatComposer
-                prompt={prompt}
-                theme={theme}
-                placeholder="让 Agent 做点什么，例如：在画布上把这两个节点连起来"
-                disabled={!projectId || !activeId || available === false}
-                sending={sending}
-                onPromptChange={setPrompt}
-                onSubmit={() => void submit()}
-                onStop={stop}
-                models={models}
-                model={currentModelName}
-                onModelChange={(value: string) => {
-                    const item = models.find((model) => model.model === value);
-                    if (item) void changeModel(item.id);
-                }}
-            />
+                    {error ? <div className="px-3 pb-1 text-xs text-red-500">{error}</div> : null}
+
+                    <AgentChatComposer
+                        prompt={prompt}
+                        theme={theme}
+                        placeholder="让 Agent 做点什么，例如：在画布上把这两个节点连起来"
+                        disabled={!projectId || !activeId || available === false}
+                        sending={sending}
+                        onPromptChange={setPrompt}
+                        onSubmit={() => void submit()}
+                        onStop={stop}
+                        models={models}
+                        model={currentModelName}
+                        onModelChange={(value: string) => {
+                            const item = models.find((model) => model.model === value);
+                            if (item) void changeModel(item.id);
+                        }}
+                    />
+                </>
+            )}
 
             <Modal
                 open={Boolean(permission)}
@@ -399,4 +478,10 @@ export function AcpAgentPanel() {
             </Modal>
         </div>
     );
+}
+
+function formatConversationTime(value?: string) {
+    if (!value) return "";
+    const date = dayjs(value);
+    return date.isValid() ? date.format("MM-DD HH:mm") : "";
 }
