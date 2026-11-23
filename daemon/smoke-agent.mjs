@@ -111,6 +111,7 @@ try {
 
     const listed = await api(`/api/projects/${PROJECT}/agent/conversations`);
     check("列表包含两个对话", listed.json?.conversations?.length === 2, JSON.stringify(listed.json?.conversations?.map((item) => item.title)));
+    check("列表带对话预览", listed.json?.conversations?.some((item) => String(item.preview || "").includes("收到A")), JSON.stringify(listed.json?.conversations?.map((item) => item.preview)));
 
     // 重启 daemon：对话与 transcript 都要保留
     daemon.kill();
