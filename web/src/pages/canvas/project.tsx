@@ -2789,7 +2789,29 @@ function InfiniteCanvasPage() {
                     message.warning("还没有默认模型：请到设置 → 渠道 里选一个，或在节点上单独选择");
                     return;
                 }
-                await runSolgridGeneration(sourceNode, mode, prompt, tool);
+                // 「已有内容 + 新建节点」：新建一个同类型空节点承接结果，源节点继续作为参考/提示
+                const overwriteExisting = effectiveConfig.nodeRegenerateBehavior === "overwrite";
+                let targetNode = sourceNode;
+                if (!overwriteExisting && sourceNode.metadata?.content) {
+                    const outputType = mode === "image" ? CanvasNodeType.Image : mode === "video" ? CanvasNodeType.Video : CanvasNodeType.Audio;
+                    const spec = NODE_DEFAULT_SIZE[outputType];
+                    const { content: _content, storageKey: _storageKey, naturalWidth: _naturalWidth, naturalHeight: _naturalHeight, bytes: _bytes, mimeType: _mimeType, durationMs: _durationMs, images: _images, texts: _texts, primaryImageId: _primaryImageId, primaryTextId: _primaryTextId, videoTaskId: _videoTaskId, videoTaskProvider: _videoTaskProvider, status: _status, errorDetails: _errorDetails, ...configMetadata } = sourceNode.metadata || {};
+                    const created = createCanvasNode(outputType, { x: sourceNode.position.x + sourceNode.width / 2 + spec.width / 2 + 96, y: sourceNode.position.y + sourceNode.height / 2 }, {
+                        ...configMetadata,
+                        prompt,
+                        status: NODE_STATUS_LOADING,
+                        errorDetails: undefined,
+                    });
+                    targetNode = { ...created, title: prompt.slice(0, 32) || created.title };
+                    const edge = { id: nanoid(), fromNodeId: sourceNode.id, toNodeId: targetNode.id };
+                    nodesRef.current = [...nodesRef.current, targetNode];
+                    connectionsRef.current = [...connectionsRef.current, edge];
+                    setNodes((prev) => [...prev, targetNode]);
+                    setConnections((prev) => [...prev, edge]);
+                    setSelectedNodeIds(new Set([targetNode.id]));
+                    setDialogNodeId(targetNode.id);
+                }
+                await runSolgridGeneration(targetNode, mode, prompt, tool);
                 return;
             }
             const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
@@ -3565,9 +3587,17 @@ function InfiniteCanvasPage() {
                 void generateNodeRef.current?.(node.id, "text", node.metadata?.prompt || "");
                 return;
             }
+            const retryMode =
+                node.type === CanvasNodeType.Image ? "image" : node.type === CanvasNodeType.Video ? "video" : node.type === CanvasNodeType.Audio ? "audio" : node.type === CanvasNodeType.Text ? "text" : null;
+            const retryPrompt = node.metadata?.prompt?.trim();
+            // 有内容时遵守「新建节点」偏好：重试不应把旧结果原节点覆盖掉
+            if (retryMode && retryPrompt && node.metadata?.content && effectiveConfig.nodeRegenerateBehavior !== "overwrite" && generateNodeRef.current) {
+                void generateNodeRef.current(node.id, retryMode, retryPrompt);
+                return;
+            }
             void handleRetryNode(node);
         },
-        [handleRetryNode],
+        [effectiveConfig.nodeRegenerateBehavior, handleRetryNode],
     );
     const handleNodeContextMenu = useCallback((event: ReactMouseEvent, nodeId: string) => {
         event.preventDefault();
