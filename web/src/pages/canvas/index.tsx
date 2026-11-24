@@ -7,6 +7,9 @@ import { useTranslation } from "react-i18next";
 import { readZip } from "@/lib/zip";
 import { setMediaBlob } from "@/services/file-storage";
 import { setImageBlob } from "@/services/image-storage";
+import { uploadAsset } from "@/services/api/assets";
+import { rewriteImportedProject } from "@/lib/canvas/canvas-import";
+import { nanoid } from "nanoid";
 import { CanvasDeleteProjectsDialog } from "@/components/canvas/canvas-delete-projects-dialog";
 import { CanvasProjectCard } from "@/components/canvas/canvas-project-card";
 import type { CanvasExportFile } from "@/types/canvas-export";
@@ -42,17 +45,28 @@ export default function CanvasPage() {
             const projectFile = zip.get("projects.json");
             if (!projectFile) throw new Error("missing projects.json");
             const data = JSON.parse(await projectFile.text()) as CanvasExportFile;
-            await Promise.all(
-                data.projects.flatMap((project) =>
-                    project.files.map(async (item) => {
-                        const blob = zip.get(item.path);
-                        if (!blob) return;
-                        const typedBlob = blob.type ? blob : blob.slice(0, blob.size, item.mimeType);
-                        await (item.storageKey.startsWith("image:") ? setImageBlob(item.storageKey, typedBlob) : setMediaBlob(item.storageKey, typedBlob));
-                    }),
-                ),
-            );
-            data.projects.forEach((item) => importProject(item.project));
+            // 每个导出项目落到一个新的 projectId；资产重新上传到该项目目录，
+            // 并把节点/会话里的 storageKey 与资产 URL 全部重写，保证导入后自包含。
+            for (const item of data.projects) {
+                const newId = nanoid();
+                const storageKeyMap = new Map<string, string>();
+                for (const entry of item.files) {
+                    const blob = zip.get(entry.path);
+                    if (!blob) continue;
+                    const typedBlob = blob.type ? blob : blob.slice(0, blob.size, entry.mimeType);
+                    if (entry.storageKey.startsWith("asset:")) {
+                        if (storageKeyMap.has(entry.storageKey)) continue;
+                        const asset = await uploadAsset(typedBlob, entry.mimeType, newId);
+                        storageKeyMap.set(entry.storageKey, asset.storageKey);
+                    } else if (entry.storageKey.startsWith("image:")) {
+                        await setImageBlob(entry.storageKey, typedBlob);
+                    } else {
+                        await setMediaBlob(entry.storageKey, typedBlob);
+                    }
+                }
+                const rewritten = rewriteImportedProject({ ...item.project, id: newId }, item.project.id, newId, storageKeyMap);
+                importProject(rewritten, newId);
+            }
             message.success(t("canvas.imported", { count: data.projects.length }));
         } catch {
             message.error(t("canvas.importFailed"));

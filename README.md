@@ -87,3 +87,6 @@ node bin/solgrid-canvas.mjs sync-config --from <profile> --profile acp
 | [AGENTS.md](AGENTS.md) | 本项目开发约束（架构铁律） |
 | [upstream_readme.md](upstream_readme.md) | 上游 infinite-canvas 原始 README（历史参考） |
 
+## Agent 兼容性
+
+画布 daemon 通过 ACP 驱动本地 Agent，按 stdio NDJSON 调用 `initialize / session/new / session/prompt / session/cancel / session/close` 等标准方法。推荐 DSH `0.2.2-rc.5` 及以上；旧版 dsh-acp 可能存在工具状态不回收、同一 serverName 多会话冲突的问题。WorkBuddy 通过 CodeBuddy Code CLI 的 `codebuddy --acp` 接入。

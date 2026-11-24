@@ -158,6 +158,20 @@ try {
     const textDetail = await call("canvas_get_node", { projectId: "mcpproj", nodeId: "text1" });
     check("文本节点写入并标记 success", textDetail.data?.node?.metadata?.content === "你好，世界" && textDetail.data?.node?.metadata?.status === "success", JSON.stringify(textDetail.data?.node?.metadata).slice(0, 160));
 
+    const summary = await call("canvas_get_state", { projectId: "mcpproj" });
+    const textSummary = summary.data.nodes.find((node) => node.id === "text1");
+    check("get_state 摘要包含文本内容", textSummary?.content === "你好，世界", JSON.stringify(textSummary).slice(0, 160));
+
+    const beforeFile = await call("canvas_get_state", { projectId: "mcpproj" });
+    const addFile = await call("canvas_apply_ops", {
+        projectId: "mcpproj",
+        expectRev: beforeFile.data.project.rev,
+        ops: [{ type: "add_node", node: { id: "file1", type: "file", "x-solgrid": { nodeType: "video" }, title: "file node", position: { x: 0, y: 900 }, width: 320, height: 240, metadata: { mimeType: "video/mp4" } } }],
+    });
+    check("add_node 的 file 类型被还原", !addFile.isError, JSON.stringify(addFile.data));
+    const fileDetail = await call("canvas_get_node", { projectId: "mcpproj", nodeId: "file1" });
+    check("file 节点语义类型为 video", fileDetail.data?.node?.type === "video", JSON.stringify(fileDetail.data?.node)?.slice(0, 160));
+
     const pngPath = path.join(HOME, "inbox", "frame.png");
     fs.writeFileSync(pngPath, TINY_PNG);
     const placed = await call("canvas_place_artifacts", {

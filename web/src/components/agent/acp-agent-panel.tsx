@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Modal, Segmented, Tag } from "antd";
-import { Bot, Folder, History, MessageSquare, PanelRightClose, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Bot, Folder, History, MessageSquare, Move, PanelRightClose, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useMatch } from "react-router-dom";
 import dayjs from "dayjs";
 
@@ -10,6 +10,7 @@ import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { promptWithCanvasReferences } from "./agent-event-formatters";
 import {
     cancelAgentPrompt,
+    closeAgentProject,
     createAgentConversation,
     decideAgentPermission,
     deleteAgentConversation,
@@ -37,13 +38,19 @@ function modelOf(configOptions: AgentConfigOption[]): { models: AgentModel[]; cu
     for (const group of option?.options || []) {
         for (const item of group.options || []) {
             let model = item.value;
+            let provider = "";
             try {
                 const parsed = JSON.parse(item.value);
-                if (Array.isArray(parsed)) model = String(parsed[1] || parsed[0] || item.value);
+                if (Array.isArray(parsed)) {
+                    provider = String(parsed[0] || "");
+                    model = String(parsed[1] || parsed[0] || item.value);
+                }
             } catch {
                 /* 非 JSON 值直接用 */
             }
-            models.push({ id: item.value, model, displayName: item.name, defaultReasoningEffort: "medium", supportedReasoningEfforts: [], isDefault: item.value === option?.currentValue });
+            // 不同 provider 可能有同名模型：选择器的 value 必须唯一，否则会被合并成一个选项。
+            const uniqueModel = provider ? `${provider} / ${model}` : model;
+            models.push({ id: item.value, model: uniqueModel, displayName: provider ? `${provider} / ${item.name || model}` : item.name, defaultReasoningEffort: "medium", supportedReasoningEfforts: [], isDefault: item.value === option?.currentValue });
         }
     }
     return { models, current: option?.currentValue || "" };
@@ -59,7 +66,7 @@ function messagesFromTranscript(transcript: AgentTranscriptItem[]): AgentChatIte
 }
 
 // 画布内 Agent：每个画布一个对话列表，对话之间会话隔离、可切换
-export function AcpAgentPanel() {
+export function AcpAgentPanel({ floating = false, onToggleFloating }: { floating?: boolean; onToggleFloating?: () => void } = {}) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const match = useMatch("/canvas/:id");
     const projectId = match?.params.id || "";
@@ -95,6 +102,14 @@ export function AcpAgentPanel() {
 
     useEffect(() => {
         projectRef.current = projectId;
+    }, [projectId]);
+
+    // 离开当前画布时关闭该项目的 ACP 会话，避免切画布后旧会话一直挂起
+    useEffect(() => {
+        if (!projectId) return;
+        return () => {
+            void closeAgentProject(projectId).catch(() => undefined);
+        };
     }, [projectId]);
     useEffect(() => {
         activeRef.current = activeId;
@@ -494,6 +509,7 @@ export function AcpAgentPanel() {
                             { value: "history", label: <span className="flex items-center gap-1"><History className="size-3.5" />历史{conversations.length ? ` ${conversations.length}` : ""}</span> },
                         ]}
                     />
+                    {onToggleFloating ? <Button size="small" type="text" icon={<Move className="size-4" />} onClick={onToggleFloating} aria-label={floating ? "停靠到右侧" : "悬浮"} title={floating ? "停靠到右侧" : "悬浮"} /> : null}
                     <Button size="small" type="text" icon={<PanelRightClose className="size-4" />} onClick={closePanel} aria-label="关闭" />
                 </div>
             </div>
@@ -563,7 +579,7 @@ export function AcpAgentPanel() {
                 </div>
             ) : (
                 <>
-                    {available === false ? (
+                    {available === false && !error ? (
                         <div className="mx-3 rounded-lg bg-stone-100 p-3 text-xs text-stone-600 dark:bg-stone-900 dark:text-stone-300">
                             没有找到可用的 ACP Agent。目前支持 DSH 桌面版；也可以用环境变量 <code>CANVAS_ACP_COMMAND</code> / <code>CANVAS_ACP_ARGS</code> 指定别的适配器。
                         </div>

@@ -69,6 +69,11 @@ export function CanvasToolbar({
     const [panelX, setPanelX] = useState(0);
     const [extensionsOpen, setExtensionsOpen] = useState(false);
     const [extPanelX, setExtPanelX] = useState(0);
+    const [position, setPosition] = useState<"bottom" | "left">(() => (localStorage.getItem("canvas-toolbar-position") === "left" ? "left" : "bottom"));
+    const changePosition = (value: "bottom" | "left") => {
+        setPosition(value);
+        localStorage.setItem("canvas-toolbar-position", value);
+    };
     // Keep extension plugin nodes synchronized with registry changes.
     useNodeRegistryVersion();
     const extensionDefs = listNodeDefinitions().filter((def) => def.showInCreateMenu !== false && getNodePluginId(def.type) !== "builtin");
@@ -91,9 +96,20 @@ export function CanvasToolbar({
     }, [extensionsOpen, appearanceOpen]);
 
     return (
-        <div ref={rootRef} className="pointer-events-none absolute bottom-5 z-50 flex justify-center" style={{ left: 300, right: 16 }} data-canvas-bottom-toolbar>
-            {tip ? <DockTip label={tip} x={tipX} theme={theme} /> : null}
-            <div ref={wrapRef} className="thin-scrollbar pointer-events-auto flex h-14 max-w-full items-center gap-1 overflow-x-auto rounded-xl border px-2 shadow-lg backdrop-blur [&>*]:shrink-0" style={dockStyle}>
+        <div
+            ref={rootRef}
+            className={`pointer-events-none absolute z-50 flex ${position === "bottom" ? "bottom-5 justify-center" : "left-4 top-1/2 -translate-y-1/2"}`}
+            style={position === "bottom" ? { left: 300, right: 16 } : undefined}
+            data-canvas-bottom-toolbar
+        >
+            {position === "bottom" && tip ? <DockTip label={tip} x={tipX} theme={theme} /> : null}
+            <div
+                ref={wrapRef}
+                className={`thin-scrollbar pointer-events-auto flex gap-1 rounded-xl border shadow-lg backdrop-blur [&>*]:shrink-0 ${
+                    position === "bottom" ? "h-14 max-w-full items-center overflow-x-auto px-2" : "max-h-[calc(100vh-6rem)] w-14 flex-col items-center overflow-y-auto px-2 py-2"
+                }`}
+                style={dockStyle}
+            >
                 <ToolbarButton id={`tool-${canvasTool}`} label={t(`canvas.toolbar.${canvasTool}`)} active hovered={hovered} activeStyle={activeStyle} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={() => onCanvasToolChange(canvasTool === "select" ? "pan" : "select")}>
                     {canvasTool === "select" ? <MousePointer2 className="size-4.5" /> : <Hand className="size-4.5" />}
                 </ToolbarButton>
@@ -183,8 +199,10 @@ export function CanvasToolbar({
 
             {extensionsOpen && extensionDefs.length ? (
                 <div
-                    className="thin-scrollbar pointer-events-auto absolute bottom-[72px] z-30 max-h-[50vh] w-[240px] -translate-x-1/2 overflow-y-auto rounded-xl border p-2 shadow-xl backdrop-blur"
-                    style={{ left: extPanelX || "50%", background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.toolbar.item }}
+                    className={`thin-scrollbar pointer-events-auto absolute z-30 max-h-[50vh] w-[240px] overflow-y-auto rounded-xl border p-2 shadow-xl backdrop-blur ${
+                        position === "bottom" ? "bottom-[72px] -translate-x-1/2" : "left-[72px] top-0"
+                    }`}
+                    style={{ ...(position === "bottom" ? { left: extPanelX || "50%" } : null), background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.toolbar.item }}
                 >
                     <div className="px-1.5 pb-1.5 text-[11px] font-medium opacity-50">{t("canvas.toolbar.extensions")}</div>
                     <div className="grid gap-0.5">
@@ -213,8 +231,10 @@ export function CanvasToolbar({
 
             {appearanceOpen ? (
                 <div
-                    className="pointer-events-auto absolute bottom-[72px] z-30 w-[248px] -translate-x-1/2 rounded-xl border p-2.5 shadow-xl backdrop-blur"
-                    style={{ left: panelX || "50%", background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.toolbar.item }}
+                    className={`pointer-events-auto absolute z-30 w-[248px] rounded-xl border p-2.5 shadow-xl backdrop-blur ${
+                        position === "bottom" ? "bottom-[72px] -translate-x-1/2" : "left-[72px] top-0"
+                    }`}
+                    style={{ ...(position === "bottom" ? { left: panelX || "50%" } : null), background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.toolbar.item }}
                 >
                     <div className="px-1 pb-2 text-sm font-medium opacity-65">{t("canvas.toolbar.appearance")}</div>
                     <div className="px-1 pb-1.5 text-[11px] font-medium opacity-50">{t("canvas.toolbar.themeMode")}</div>
@@ -228,6 +248,16 @@ export function CanvasToolbar({
                             {t("canvas.toolbar.dark")}
                         </CanvasThemeButton>
                     </div>
+                    <div className="mt-3 px-1 pb-1.5 text-[11px] font-medium opacity-50">工具栏位置</div>
+                    <Segmented
+                        className="w-full !p-1 [&_.ant-segmented-group]:!flex [&_.ant-segmented-item]:!min-h-8 [&_.ant-segmented-item]:!flex-1 [&_.ant-segmented-item-label]:!min-h-8 [&_.ant-segmented-item-label]:!leading-8"
+                        value={position}
+                        onChange={(value) => changePosition(value as "bottom" | "left")}
+                        options={[
+                            { value: "bottom", label: "底部" },
+                            { value: "left", label: "左侧" },
+                        ]}
+                    />
                     <div className="mt-3 px-1 pb-1.5 text-[11px] font-medium opacity-50">{t("canvas.toolbar.gridStyle")}</div>
                     <Segmented
                         className="w-full !p-1 [&_.ant-segmented-group]:!flex [&_.ant-segmented-item]:!min-h-8 [&_.ant-segmented-item]:!flex-1 [&_.ant-segmented-item-label]:!min-h-8 [&_.ant-segmented-item-label]:!leading-8"

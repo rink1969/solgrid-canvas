@@ -137,6 +137,8 @@ export const CanvasNode = React.memo(function CanvasNode({
     const hasVideoContent = data.type === CanvasNodeType.Video && Boolean(data.metadata?.content);
     const hasAudioContent = data.type === CanvasNodeType.Audio && Boolean(data.metadata?.content);
     const isGroup = data.type === CanvasNodeType.Group;
+    // 生成失败/重试时保留上一次已产出的内容，避免产物在界面上“消失”
+    const hasRetainedContent = Boolean(data.metadata?.content) && data.type !== CanvasNodeType.Group && data.type !== CanvasNodeType.Config;
     const batchCount = data.type === CanvasNodeType.Image ? data.metadata?.images?.length || 0 : data.type === CanvasNodeType.Text ? data.metadata?.texts?.length || 0 : 0;
     const isBatchRoot = batchCount > 1;
     // Nodes with the interaction/move toggle ignore content pointer events in move mode and allow interaction in interactive mode.
@@ -436,6 +438,17 @@ export const CanvasNode = React.memo(function CanvasNode({
                     />
                 </div>
 
+                {hasRetainedContent && data.metadata?.status === "loading" ? (
+                    <div className="pointer-events-none absolute right-2 top-2 z-20 grid size-7 place-items-center rounded-full border shadow-sm" style={{ background: theme.toolbar.panel, borderColor: theme.node.stroke }} title={t("canvas.node.generating")}>
+                        <div className="size-3.5 animate-spin rounded-full border-2" style={{ borderColor: theme.node.stroke, borderTopColor: theme.node.activeStroke }} />
+                    </div>
+                ) : null}
+                {hasRetainedContent && data.metadata?.status === "error" ? (
+                    <div className="pointer-events-none absolute inset-x-2 bottom-2 z-20 truncate rounded-lg px-2 py-1 text-[10px] text-red-200 shadow-sm" style={{ background: "rgba(127,29,29,.82)" }} title={data.metadata?.errorDetails || t("canvas.node.failed")}>
+                        生成失败 · 已保留上次结果
+                    </div>
+                ) : null}
+
                 {showImageInfo && hasImageContent ? <ImageInfoBar node={data} /> : null}
 
                 {!isGroup && !hasImageContent && !hasVideoContent && !hasAudioContent ? <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12" style={{ background: `linear-gradient(to top, ${theme.canvas.background}66, transparent)` }} /> : null}
@@ -469,8 +482,10 @@ function NodeContent(props: NodeContentRendererProps) {
     if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return props.renderNodeContent(props.node);
     if (props.isBatchRoot && props.node.type === CanvasNodeType.Image) return <ImageNodeContent {...props} />;
     if (props.node.type === CanvasNodeType.Text && props.node.metadata?.texts?.length && (props.node.metadata.status !== "error" || props.node.metadata.texts.some((text) => text.content))) return <TextContent {...props} />;
-    if (props.node.metadata?.status === "loading") return <LoadingContent theme={props.theme} />;
-    if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
+    // 有内容时即使加载中/失败也继续渲染旧内容，错误状态由节点右上/底部的浮层提示。
+    const keepContent = Boolean(props.node.metadata?.content) && props.node.type !== CanvasNodeType.Group && props.node.type !== CanvasNodeType.Config;
+    if (!keepContent && props.node.metadata?.status === "loading") return <LoadingContent theme={props.theme} />;
+    if (!keepContent && props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
 
     const Renderer = nodeContentRenderers[props.node.type as CanvasNodeType];
     if (Renderer) return <Renderer {...props} />;

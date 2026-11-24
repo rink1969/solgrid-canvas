@@ -50,27 +50,41 @@ export function estimateSpark(price: unknown, options: { outputs?: number; refer
     const resolution = options.resolution ? normalizeResolution(String(options.resolution)) : "";
     const rates = Array.isArray(value.rates) ? value.rates : [];
 
-    let total = 0;
-    let matched = false;
-
+    // 同一 meter 可能按 image_tier / resolution 等条件列多档，但一次生成只会命中其中一档。
+    // 之前逐条累加会把同 meter 的多档全部算进去（实测 7.8 vs 实扣 3.9）。
+    const groups = new Map<string, SolgridPriceRate[]>();
     for (const rate of rates) {
         const meter = String(rate.meter || "");
         const isInputImages = /inputimages?/i.test(meter) && !/output/i.test(meter);
         const isSeconds = /seconds?/i.test(meter) && !/input/i.test(meter);
         const isOutput = /output(images?|videos?)/i.test(meter);
         if (!isInputImages && !isSeconds && !isOutput) continue;
+        const key = isInputImages ? "input" : isSeconds ? "seconds" : "output";
+        const list = groups.get(key) || [];
+        list.push(rate);
+        groups.set(key, list);
+    }
 
-        const condition = (rate.conditions || {}) as Record<string, string>;
-        if (condition.resolution) {
-            if (!resolution) continue; // 没给分辨率时跳过带条件的档位
-            if (normalizeResolution(condition.resolution) !== resolution) continue;
-        }
+    let total = 0;
+    let matched = false;
 
-        const units = isInputImages ? references : isSeconds ? seconds : outputs;
+    for (const [kind, list] of groups) {
+        const units = kind === "input" ? references : kind === "seconds" ? seconds : outputs;
         if (!units) continue;
-        const unitSize = Math.max(1, Number(rate.unitSize) || 1);
-        const unitPrice = Number(rate.unitPrice) || 0;
-        const freeUnits = Number(rate.freeUnits) || 0;
+
+        // 只取一档：优先匹配已知的 resolution；未知条件（image_tier 等）不参与筛选，
+        // 避免“没有依据地多算”，也避免整组被跳过。
+        let chosen: SolgridPriceRate | undefined;
+        if (resolution) {
+            chosen = list.find((rate) => (rate.conditions as Record<string, string> | null)?.resolution && normalizeResolution(String(rate.conditions?.resolution)) === resolution) || list.find((rate) => !(rate.conditions as Record<string, string> | null)?.resolution);
+        } else {
+            chosen = list.find((rate) => !(rate.conditions as Record<string, string> | null)?.resolution) || list[0];
+        }
+        if (!chosen) continue;
+
+        const unitSize = Math.max(1, Number(chosen.unitSize) || 1);
+        const unitPrice = Number(chosen.unitPrice) || 0;
+        const freeUnits = Number(chosen.freeUnits) || 0;
         const billable = Math.max(0, units - freeUnits);
         if (!billable) continue;
         total += Math.ceil(billable / unitSize) * unitPrice;

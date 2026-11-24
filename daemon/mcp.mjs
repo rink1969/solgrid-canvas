@@ -140,6 +140,8 @@ function pickNodeSummary(node) {
         provider: node.metadata?.provider,
         endpoint: node.metadata?.endpoint,
         storageKey: node.metadata?.storageKey,
+        content: typeof node.metadata?.content === "string" ? node.metadata.content.slice(0, 2000) : undefined,
+        pluginColor: node.metadata?.pluginColor,
     };
 }
 

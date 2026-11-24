@@ -60,6 +60,10 @@ export function deleteAgentConversation(projectId: string, conversationId: strin
     return request<{ ok: boolean }>(`/projects/${projectId}/agent/conversations/${conversationId}`, { method: "DELETE" });
 }
 
+export function closeAgentProject(projectId: string) {
+    return request<{ closed: number }>(`/projects/${projectId}/agent/close`, { method: "POST" });
+}
+
 export function getAgentTranscript(projectId: string, conversationId: string) {
     return request<{ transcript: AgentTranscriptItem[] }>(`/projects/${projectId}/agent/conversations/${conversationId}/transcript`);
 }

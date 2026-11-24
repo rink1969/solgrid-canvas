@@ -29,7 +29,7 @@ type CanvasStore = {
     projects: CanvasProject[];
     deletedProjects: CanvasDeletedProject[];
     createProject: (title?: string) => string;
-    importProject: (project: Partial<CanvasProject>) => string;
+    importProject: (project: Partial<CanvasProject>, id?: string) => string;
     openProject: (id: string) => CanvasProject | null;
     renameProject: (id: string, title: string) => void;
     deleteProjects: (ids: string[]) => void;
@@ -64,10 +64,10 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
         set((state) => ({ projects: [project, ...state.projects] }));
         return id;
     },
-    importProject: (source) => {
+    importProject: (source, id) => {
         const now = new Date().toISOString();
         const project: CanvasProject = {
-            id: nanoid(),
+            id: id || nanoid(),
             title: source.title || i18n.t("canvas.project.imported"),
             createdAt: source.createdAt || now,
             updatedAt: now,

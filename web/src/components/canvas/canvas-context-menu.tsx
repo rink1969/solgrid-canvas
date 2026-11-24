@@ -39,8 +39,13 @@ export function CanvasNodeContextMenu({ menu, canCaptureVideoFrame, canGroup, ca
             {menu.type === "node" && canGroup ? <MenuButton icon={<Group className="size-4" />} label={t("canvas.nodeToolbar.group")} onClick={onGroup} /> : null}
             {menu.type === "node" && canUngroup ? <MenuButton icon={<Ungroup className="size-4" />} label={t("canvas.nodeToolbar.ungroup")} onClick={onUngroup} /> : null}
             {menu.type === "node" ? <MenuButton icon={<Plus className="size-4" />} label={t("canvas.controls.duplicate")} onClick={onDuplicate} /> : null}
-            {menu.type === "node" && onSendToAgent ? <MenuButton icon={<MessageSquarePlus className="size-4" />} label="发送到对话" onClick={onSendToAgent} /> : null}
             <MenuButton icon={<Trash2 className="size-4" />} label={t("canvas.controls.delete")} onClick={onDelete} danger />
+            {menu.type === "node" && onSendToAgent ? (
+                <>
+                    <div className="my-1 border-t" style={{ borderColor: theme.toolbar.border }} />
+                    <MenuButton icon={<MessageSquarePlus className="size-4" />} label="发送到对话" onClick={onSendToAgent} />
+                </>
+            ) : null}
         </div>
     );
 }

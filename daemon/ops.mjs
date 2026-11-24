@@ -5,6 +5,27 @@ function ensure(condition, message) {
     if (!condition) throw Object.assign(new Error(message), { code: "invalid_op" });
 }
 
+const JSON_CANVAS_FILE_MIME = [
+    ["image/", "image"],
+    ["video/", "video"],
+    ["audio/", "audio"],
+];
+
+// 外部工具可能按 JSON Canvas 规范传 type:"file"；落库前还原成语义节点类型，
+// 否则 store 会把 JSON type 写成 text、语义类型留成 file，前端查不到渲染器。
+function normalizeAddedNode(node) {
+    const ext = node["x-solgrid"] || {};
+    let type = node.type;
+    if (type === "file") {
+        const mime = String(node.metadata?.mimeType || node.metadata?.mime || "");
+        const inferred = JSON_CANVAS_FILE_MIME.find(([prefix]) => mime.toLowerCase().startsWith(prefix))?.[1];
+        type = ext.nodeType && ext.nodeType !== "file" ? ext.nodeType : inferred;
+        ensure(type && type !== "file", "add_node 的 type=file 需要 x-solgrid.nodeType 或 metadata.mimeType（image/video/audio）");
+    }
+    ensure(typeof type === "string" && type.length > 0, "add_node 需要 node.type");
+    return { ...node, type };
+}
+
 export function normalizeOps(ops) {
     ensure(Array.isArray(ops) && ops.length > 0, "ops 不能为空");
     ensure(ops.length <= 500, "单次最多 500 个 op");
@@ -24,7 +45,7 @@ export function applyOps(store, projectId, ops) {
         switch (op.type) {
             case "add_node": {
                 ensure(op.node?.id, "add_node 需要 node.id");
-                nodes.set(op.node.id, op.node);
+                nodes.set(op.node.id, normalizeAddedNode(op.node));
                 break;
             }
             case "update_node": {

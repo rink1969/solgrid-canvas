@@ -23,8 +23,7 @@ export function assetKeyToUrl(storageKey: string) {
     return `/api/projects/${projectId}/assets/${file}`;
 }
 
-export async function uploadAsset(blob: Blob, mimeType?: string): Promise<UploadedAsset> {
-    const projectId = getActiveProjectId();
+export async function uploadAsset(blob: Blob, mimeType?: string, projectId = getActiveProjectId()): Promise<UploadedAsset> {
     const mime = mimeType || blob.type || "application/octet-stream";
     const response = await fetch(`/api/projects/${projectId}/assets?mime=${encodeURIComponent(mime)}`, {
         method: "POST",

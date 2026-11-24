@@ -352,6 +352,11 @@ async function handle(req, res) {
         return sendJson(res, 200, agent.status());
     }
 
+    const closeAgentProject = pathname.match(/^\/api\/projects\/([A-Za-z0-9_-]{1,64})\/agent\/close$/);
+    if (closeAgentProject && req.method === "POST") {
+        return sendJson(res, 200, { closed: agent.closeProject(closeAgentProject[1]) });
+    }
+
     const conversationProject = pathname.match(/^\/api\/projects\/([A-Za-z0-9_-]{1,64})\/agent\/conversations$/);
     if (conversationProject) {
         const projectId = conversationProject[1];
@@ -457,9 +462,21 @@ async function handle(req, res) {
         } catch (error) {
             return sendJson(res, 400, { error: "invalid_json", message: error.message });
         }
-        const { projectId, nodeId, provider, endpoint } = body || {};
+        const { projectId, nodeId, provider, endpoint, prompt } = body || {};
         if (!projectId || !provider || !endpoint) return sendJson(res, 400, { error: "missing_fields" });
-        const approval = approvals.create({ projectId, nodeId: nodeId || null, provider, endpoint, params: body.params || {} });
+        const params = { ...(body.params || {}) };
+        // 兼容两种写法：prompt 放 params 内（画布自己用）或放请求体顶层（Agent/脚本常用）。
+        if (typeof params.prompt !== "string" || !params.prompt.trim()) {
+            if (typeof prompt === "string") params.prompt = prompt;
+        }
+        // 再回退到节点自己的提示词，避免“审批通过后才发现参数不全”。
+        if (typeof params.prompt !== "string" || !params.prompt.trim()) {
+            if (nodeId) {
+                const node = store.readProject(projectId)?.nodes?.find((item) => item.id === nodeId);
+                if (typeof node?.metadata?.prompt === "string") params.prompt = node.metadata.prompt;
+            }
+        }
+        const approval = approvals.create({ projectId, nodeId: nodeId || null, provider, endpoint, params });
         return sendJson(res, 200, { id: approval.id, status: approval.status, run: approval.run || null });
     }
 

@@ -2,6 +2,25 @@
 
 ## Unreleased
 
++ [新增] 底部工具栏可在「外观」里切换到底部/左侧，左侧模式不遮挡画布中部节点。
++ [新增] Agent 面板支持「悬浮/停靠」切换，悬浮时不占用画布宽度。
+
++ [修复] 导出→导入画布改为自包含：资产复制到新项目目录，节点/会话里的 storageKey 与资产 URL 全部重写。
++ [修复] 生成失败/重试时保留上一次已产出的图片、视频、音频或文本，并显示“已保留上次结果”提示。
++ [修复] 新建画布时旧画布的节点/会话被写入新项目：切换项目先清空状态，未完成 restore 前禁止保存。
++ [修复] 生成费用预估对同一 meter 只取一档，避免 image_tier 多档被累加导致报价翻倍。
++ [修复] `/api/approvals` 顶层 prompt 丢失：支持 params.prompt / 顶层 prompt / 节点 metadata.prompt 回退。
++ [修复] `add_node` 传 JSON Canvas `type:"file"` 时按 x-solgrid.nodeType 或 metadata.mimeType 还原语义类型。
++ [修复] Agent 模型下拉跨 provider 重名：选项值带上 provider，避免同名模型被合并。
++ [修复] ACP 错误保留 `error.data.details`；面板不再在 session 建立失败时显示“没有找到 ACP Agent”。
++ [修复] `canvas_get_state` 摘要补充文本内容与 pluginColor，插件节点不用逐个 get_node。
++ [修复] 旧版 ACP 的 `tool_call_update` 缺少 toolCallId 时按最近 in_progress 工具兜底收尾。
++ [修复] 离开画布时发送 session/close；连续新建节点自动错位，不再叠在画布中心。
++ [修复] 右键菜单把「发送到对话」与节点操作分组，避免夹在复制/删除之间。
++ [调整] Agent prompt 自动附带当前画布 projectId，减少先列全部项目再猜画布。
++ [文档] AI_SETUP 增加 ACP 方法契约；README 增加 Agent 兼容性说明。
+
+
 + [新增] 文本节点改为「用本地 Agent 生成」：节点面板不再显示空模型/未接入提示，点击生成会把 nodeId + 要求发给 Agent，Agent 通过新 MCP 工具 `canvas_write_text` 写回节点；失败/超时会标记节点错误。
 
 
@@ -37,11 +56,9 @@
 + [新增] 未知模型族可用「生成骨架」：`/api/tools/detail` 返回 `skeleton`，参数面板一键填入，MCP `canvas_inspect_tool` 同样可用。
 
 
-## Unreleased
 
 + [修复] DSH 集成不再假设桌面版：`install --agent dsh` 会按 `DSH_PROFILE` 探测当前 profile（或 `--profile` 显式指定），`sync-config --from` 默认同样探测；画布 ACP 支持 PATH 里的 `dsh` CLI 与 DSH 内部启动环境。
 
-## Unreleased
 
 + [修复] 版本检查与更新日志改查本项目仓库（rink1969/solgrid-canvas），不再误报上游 v0.20.0；更新日志过滤掉 Unreleased。
 + [调整] 顶栏移除插件市场与文档入口；GitHub 图标改指向本项目；插件源默认留空。

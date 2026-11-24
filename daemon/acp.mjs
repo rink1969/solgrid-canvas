@@ -114,8 +114,10 @@ function createConnection({ adapter, onNotification, onRequest, log }) {
                 const { resolve, reject, timer } = pending.get(message.id);
                 pending.delete(message.id);
                 clearTimeout(timer);
-                if (message.error) reject(new Error(message.error.message || "ACP error"));
-                else resolve(message.result);
+                if (message.error) {
+                    const details = message.error.data?.details;
+                    reject(new Error(details ? `${message.error.message || "ACP error"}：${details}` : message.error.message || "ACP error"));
+                } else resolve(message.result);
                 continue;
             }
             if (message.id !== undefined && message.method) {
@@ -282,6 +284,17 @@ export function createAgentManager({ broadcast, log }) {
                 emit(projectId, conversationId, { kind: "conversation", action: "deleted" });
                 return true;
             },
+            closeProject(projectId) {
+                let closed = 0;
+                for (const [key, runtime] of [...runtimes.entries()]) {
+                    if (!key.startsWith(`${projectId}/`)) continue;
+                    if (connection) connection.notify("session/close", { sessionId: runtime.sessionId });
+                    bySession.delete(runtime.sessionId);
+                    runtimes.delete(key);
+                    closed += 1;
+                }
+                return closed;
+            },
             transcript(projectId, cwd, conversationId) {
                 const runtime = runtimes.get(runtimeKey(projectId, conversationId));
                 if (runtime) return runtime.transcript;
@@ -363,7 +376,8 @@ export function createAgentManager({ broadcast, log }) {
                 persistTranscript(projectId, conversationId, cwd, runtime.transcript);
 
                 const client = await ensureConnection();
-                const promise = client.request("session/prompt", { sessionId: runtime.sessionId, prompt: [{ type: "text", text }] }, 0);
+                const withContext = String(text).includes(`projectId=${projectId}`) ? text : `[画布上下文] 当前画布 projectId=${projectId}。\n\n${text}`;
+                const promise = client.request("session/prompt", { sessionId: runtime.sessionId, prompt: [{ type: "text", text: withContext }] }, 0);
                 promise
                     .then((result) => {
                         runtime.running = false;
@@ -512,8 +526,13 @@ export function createAgentManager({ broadcast, log }) {
                 runtime.transcript.push({ role: "tool", toolCallId: update.toolCallId, title: update.title, kind: update.kind, status: update.status });
                 persistTranscript(runtime.projectId, runtime.conversationId, runtime.cwd, runtime.transcript);
             } else if (kind === "tool_call_update") {
-                const item = runtime.transcript.find((entry) => entry.toolCallId === update.toolCallId);
+                // 个别 ACP 适配器（旧版 dsh-acp）tool_call_update 不带 toolCallId：
+                // 退回到最近一个仍 in_progress 的工具条目，至少让卡片能收尾。
+                const item = update.toolCallId
+                    ? runtime.transcript.find((entry) => entry.toolCallId === update.toolCallId)
+                    : [...runtime.transcript].reverse().find((entry) => entry.role === "tool" && entry.status === "in_progress");
                 if (item) Object.assign(item, { status: update.status, content: update.content });
+                update.toolCallId = update.toolCallId || item?.toolCallId;
                 persistTranscript(runtime.projectId, runtime.conversationId, runtime.cwd, runtime.transcript);
             }
             emit(runtime.projectId, runtime.conversationId, { kind: "update", update });

@@ -338,6 +338,8 @@ function InfiniteCanvasPage() {
 
     const nodesRef = useRef(nodes);
     const connectionsRef = useRef(connections);
+    // 当前已经完成 restore 的项目 id；为空时禁止把上一张画布的状态写进新项目
+    const loadedProjectIdRef = useRef("");
     // 远端（SSE/Agent）刷新文档时置位，跳过随之触发的本地回写
     const applyingRemoteRef = useRef(false);
     const selectedNodeIdsRef = useRef(selectedNodeIds);
@@ -514,8 +516,20 @@ function InfiniteCanvasPage() {
         [modal, stopGenerationByRunningId, t],
     );
 
+    // 切换项目时先同步清空上一张画布的状态，避免旧节点/会话在新 projectId 下被渲染或保存
+    useLayoutEffect(() => {
+        loadedProjectIdRef.current = "";
+        pendingLoadingIdsRef.current = new Set();
+        setProjectLoaded(false);
+        setNodes([]);
+        setConnections([]);
+        setChatSessions([]);
+        setActiveChatId(null);
+    }, [projectId]);
+
     useEffect(() => {
         if (!hydrated) return;
+        let canceled = false;
         setProjectLoaded(false);
         const project = openProject(projectId);
         if (!project) {
@@ -525,9 +539,10 @@ function InfiniteCanvasPage() {
 
         const restore = async () => {
             const keepLoading = await pendingSolgridNodeIds(projectId, project.nodes);
-            pendingLoadingIdsRef.current = keepLoading;
             const restoredNodes = await hydrateCanvasImages(resetInterruptedGeneration(project.nodes, keepLoading));
             const restoredSessions = await hydrateAssistantImages(project.chatSessions || []);
+            if (canceled) return;
+            pendingLoadingIdsRef.current = keepLoading;
             setNodes(restoredNodes);
             setConnections(project.connections);
             setChatSessions(restoredSessions);
@@ -549,9 +564,13 @@ function InfiniteCanvasPage() {
                 showImageInfo: project.showImageInfo || false,
             };
             setHistoryState({ canUndo: false, canRedo: false });
+            loadedProjectIdRef.current = projectId;
             setProjectLoaded(true);
         };
         void restore();
+        return () => {
+            canceled = true;
+        };
     }, [hydrated, navigate, openProject, projectId]);
 
     useEffect(() => {
@@ -633,6 +652,7 @@ function InfiniteCanvasPage() {
 
     useEffect(() => {
         if (!projectLoaded) return;
+        if (loadedProjectIdRef.current !== projectId) return;
         if (applyingRemoteRef.current) {
             applyingRemoteRef.current = false;
             return;
@@ -658,6 +678,7 @@ function InfiniteCanvasPage() {
 
     useEffect(() => {
         if (!projectLoaded) return;
+        if (loadedProjectIdRef.current !== projectId) return;
         if (viewportSaveTimerRef.current) clearTimeout(viewportSaveTimerRef.current);
         viewportSaveTimerRef.current = setTimeout(() => {
             updateProject(projectId, { viewport: viewportRef.current });
@@ -714,6 +735,17 @@ function InfiniteCanvasPage() {
         const rect = containerRef.current?.getBoundingClientRect();
         return screenToCanvas((rect?.left || 0) + (rect?.width || size.width) / 2, (rect?.top || 0) + (rect?.height || size.height) / 2);
     }, [screenToCanvas, size.height, size.width]);
+
+    // 连续新建节点时沿右下方向错开，避免全部叠在同一个画布中心
+    const getOpenNodePosition = useCallback(() => {
+        const base = getCanvasCenter();
+        const existing = nodesRef.current;
+        for (let index = 0; index < 40; index += 1) {
+            const point = { x: base.x + index * 44, y: base.y + index * 36 };
+            if (!existing.some((node) => Math.abs(node.position.x - point.x) < 12 && Math.abs(node.position.y - point.y) < 12)) return point;
+        }
+        return base;
+    }, [getCanvasCenter]);
 
     const setConnecting = useCallback((next: ConnectionHandle | null) => {
         connectingParamsRef.current = next;
@@ -953,7 +985,7 @@ function InfiniteCanvasPage() {
 
     const createNode = useCallback(
         (type: CanvasNodeTypeId, position?: Position) => {
-            const targetPosition = position || getCanvasCenter();
+            const targetPosition = position || getOpenNodePosition();
             const configMetadata =
                 type === CanvasNodeType.Config
                     ? {
@@ -980,7 +1012,7 @@ function InfiniteCanvasPage() {
                     : isBuiltinType(type) && type !== CanvasNodeType.Text && type !== CanvasNodeType.Audio && type !== CanvasNodeType.Group;
             if (wantsPanel) setDialogNodeId(newNode.id);
         },
-        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, getCanvasCenter],
+        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, getOpenNodePosition],
     );
 
     const deleteNodes = useCallback(

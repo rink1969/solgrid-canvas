@@ -293,3 +293,22 @@ npm run dev         # 终端 2，http://localhost:3000
 - 所有付费调用只由 daemon 通过 `solgrid` CLI 发起；浏览器不持有 API Key。
 - Agent 通过 MCP 改画布受 `expectRev` 乐观锁保护；生成花费需用户在画布确认（MCP 调用会弹审批）。
 - 不要把 `~/.solgrid-canvas/` 或 `web/.env.local` 提交到仓库。
+
+---
+
+## 附录：ACP 适配契约
+
+画布 daemon 作为 ACP client，通过 stdio NDJSON 按需调用以下方法：
+
+| 方法 | 用途 | 缺失/失败时的行为 |
+|---|---|---|
+| `initialize` | 握手，`protocolVersion=1` | 直接报错 |
+| `session/new` | 创建会话，附带 canvas MCP server | 实现不接受 `mcpServers` 时，去掉 MCP 重试（退化为纯对话） |
+| `session/resume` | 复用已保存的 sessionId | 失败则新建会话 |
+| `session/prompt` | 发送用户消息 | 报错并结束本轮 |
+| `session/cancel` | 停止当前轮 | 忽略错误 |
+| `session/set_config_option` | 切换模型/推理档 | 面板提示错误 |
+| `session/close` | 删除会话或离开画布时清理 | 忽略错误 |
+| `session/request_permission` | Agent 反向请求授权 | 面板弹确认框，未确认不继续 |
+
+已验证 DSH `0.2.2-rc.5`。旧版 `@deepseek-ai/dsh-acp`（如 `0.1.7-rc.2`）可能出现 `tool_call_update` 不带 `toolCallId`、同一 `serverName` 多会话冲突；daemon 对前者按“最近一个 in_progress 工具”兜底，后者需要升级 DSH 或改用每会话唯一 serverName 的适配器。
