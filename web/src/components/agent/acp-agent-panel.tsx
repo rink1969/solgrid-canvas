@@ -91,6 +91,7 @@ export function AcpAgentPanel({ floating = false, onToggleFloating }: { floating
     const previousActiveRef = useRef("");
     const refreshPromiseRef = useRef<Promise<AgentConversation[]> | null>(null);
     const projectRef = useRef(projectId);
+    const activeProjectRef = useRef("");
     const activeRef = useRef(activeId);
     const storageKey = useMemo(() => `canvas-agent-active-conversation:${projectId}`, [projectId]);
 
@@ -103,6 +104,26 @@ export function AcpAgentPanel({ floating = false, onToggleFloating }: { floating
     useEffect(() => {
         projectRef.current = projectId;
     }, [projectId]);
+
+    // 切换画布：收起面板并清掉上一张画布的会话状态，避免用旧 conversation 去请求新项目
+    const previousProjectRef = useRef(projectId);
+    useEffect(() => {
+        if (previousProjectRef.current === projectId) return;
+        previousProjectRef.current = projectId;
+        activeProjectRef.current = "";
+        activeRef.current = "";
+        setActiveId("");
+        setConversations([]);
+        setMessages([]);
+        setError("");
+        setTab("chat");
+        closePanel();
+    }, [closePanel, projectId]);
+
+    // 离开画布页面时也收起，避免回到另一张画布时自动展开旧面板
+    useEffect(() => {
+        return () => closePanel();
+    }, [closePanel]);
 
     // 离开当前画布时关闭该项目的 ACP 会话，避免切画布后旧会话一直挂起
     useEffect(() => {
@@ -121,6 +142,7 @@ export function AcpAgentPanel({ floating = false, onToggleFloating }: { floating
 
     const loadTranscript = useCallback(
         async (conversationId: string) => {
+            if (!projectId || !conversationId || projectRef.current !== projectId) return;
             const { transcript } = await getAgentTranscript(projectId, conversationId);
             setMessages(messagesFromTranscript(transcript));
         },
@@ -128,10 +150,12 @@ export function AcpAgentPanel({ floating = false, onToggleFloating }: { floating
     );
 
     const refreshConversations = useCallback(async () => {
+        if (!projectId) return [];
         // 并发调用（打开面板 + 文本生成事件）共用一次请求，避免重复建对话
         if (refreshPromiseRef.current) return refreshPromiseRef.current;
         const run = (async () => {
             const list = await listAgentConversations(projectId);
+            if (projectRef.current !== projectId) return [];
             let next = list;
             if (!next.length) {
                 const created = await createAgentConversation(projectId);
@@ -140,6 +164,7 @@ export function AcpAgentPanel({ floating = false, onToggleFloating }: { floating
             setConversations(next);
             const saved = localStorage.getItem(storageKey);
             const pick = next.some((item) => item.id === saved) ? (saved as string) : next[0].id;
+            activeProjectRef.current = projectId;
             setActiveId((currentId) => (next.some((item) => item.id === currentId) ? currentId : pick));
             return next;
         })();
@@ -163,6 +188,7 @@ export function AcpAgentPanel({ floating = false, onToggleFloating }: { floating
             const pick = localStorage.getItem(storageKey);
             const id = list.some((item) => item.id === pick) ? (pick as string) : list[0]?.id;
             if (id) {
+                activeProjectRef.current = projectId;
                 setActiveId(id);
                 await loadTranscript(id);
             }
@@ -241,7 +267,8 @@ export function AcpAgentPanel({ floating = false, onToggleFloating }: { floating
 
     // 切换对话：记录当前选择并加载 transcript
     useEffect(() => {
-        if (!activeId) return;
+        if (!activeId || !projectId) return;
+        if (activeProjectRef.current !== projectId) return;
         const previous = previousActiveRef.current;
         previousActiveRef.current = activeId;
         localStorage.setItem(storageKey, activeId);
@@ -250,7 +277,7 @@ export function AcpAgentPanel({ floating = false, onToggleFloating }: { floating
         // 只有真正从 A 切到 B 才清空引用；首次加载（"" -> id）要保留右键发送进来的引用
         if (previous && previous !== activeId) useAgentStore.getState().setAgentState({ canvasReferences: [] });
         void loadTranscript(activeId).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
-    }, [activeId, loadTranscript, storageKey]);
+    }, [activeId, loadTranscript, projectId, storageKey]);
 
     // SSE：只把当前对话的流式事件写进时间线
     useEffect(() => {
@@ -322,6 +349,7 @@ export function AcpAgentPanel({ floating = false, onToggleFloating }: { floating
         if (!projectId || !panelOpen || !activeId) return;
         let alive = true;
         const timer = setInterval(async () => {
+            if (activeProjectRef.current !== projectId) return;
             try {
                 const [transcript, list] = await Promise.all([getAgentTranscript(projectId, activeId), listAgentConversations(projectId)]);
                 if (!alive) return;
@@ -350,10 +378,12 @@ export function AcpAgentPanel({ floating = false, onToggleFloating }: { floating
         if (!id) {
             const created = await createAgentConversation(projectId);
             setConversations((prev) => [created, ...prev]);
+            activeProjectRef.current = projectId;
             activeRef.current = created.id;
             setActiveId(created.id);
             return created.id;
         }
+        activeProjectRef.current = projectId;
         activeRef.current = id;
         setActiveId(id);
         return id;
@@ -361,6 +391,7 @@ export function AcpAgentPanel({ floating = false, onToggleFloating }: { floating
 
     const sendToConversation = async (conversationId: string, text: string, nodeId?: string) => {
         // 先切到目标对话，确保紧随其后的 SSE 流能被当前面板接收
+        activeProjectRef.current = projectId;
         activeRef.current = conversationId;
         setActiveId(conversationId);
         setPrompt("");

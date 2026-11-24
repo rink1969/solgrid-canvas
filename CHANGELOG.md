@@ -2,6 +2,8 @@
 
 ## Unreleased
 
++ [修复] 切换画布时自动收起右侧本地 Agent 面板；切换/离开时清空旧会话状态并校验 projectId，避免 `/projects//agent/conversations/.../transcript` 404。
+
 + [修复] 画布 MCP serverName 按「项目 + 会话」唯一化，避免部分 ACP 实现把 serverName 当全局键时第二个会话冲突。
 
 + [修复] 图片/视频/音频生成与节点「重新生成」遵循「新建节点 / 原地覆盖」偏好；默认新建时源节点不再被标成失败；有内容节点的失败提示条 4 秒后自动消失。
