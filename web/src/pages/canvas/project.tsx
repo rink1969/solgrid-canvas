@@ -2761,7 +2761,22 @@ function InfiniteCanvasPage() {
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
             // 文本节点没有 Solgrid 端点：交给本地 Agent 生成，由 Agent 通过 canvas_write_text 回写
             if (mode === "text" && sourceNode?.type === CanvasNodeType.Text) {
-                await sendTextToAgent(sourceNode, prompt);
+                // 文本节点有内容时按偏好决定覆盖还是新建；新建时 Agent 只写新节点，源节点保持原样
+                let target = sourceNode;
+                const hasContent = Boolean(sourceNode.metadata?.content?.trim());
+                if (hasContent && effectiveConfig.nodeRegenerateBehavior !== "overwrite") {
+                    const textSize = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
+                    const position = {
+                        x: (sourceNode.position?.x || 0) + (sourceNode.width || textSize.width) + 96,
+                        y: (sourceNode.position?.y || 0) + ((sourceNode.height || textSize.height) - textSize.height) / 2,
+                    };
+                    const created = createCanvasNode(CanvasNodeType.Text, position, { prompt, content: "", status: NODE_STATUS_LOADING });
+                    target = { ...created, id: created.id, title: prompt.slice(0, 32) || "Text" };
+                    setNodes((prev) => [...prev, target]);
+                    setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: sourceNode.id, toNodeId: target.id }]);
+                    setSelectedNodeIds(new Set([target.id]));
+                }
+                await sendTextToAgent(target, prompt);
                 return;
             }
             // 图片/视频一律走 solgrid：节点自己选了模型就用节点的，否则用设置里的默认模型
@@ -2831,6 +2846,7 @@ function InfiniteCanvasPage() {
                 return;
             }
             const markSourceStatus = sourceNode?.type !== CanvasNodeType.Image && !editingTextNode;
+            const sourceStatusBefore = sourceNode?.metadata?.status;
             if (!effectivePrompt && (mode === "text" || mode === "audio")) {
                 finishGenerationRequest(nodeId, runController);
                 setRunningNodeId(null);
@@ -3189,21 +3205,23 @@ function InfiniteCanvasPage() {
                 const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");
                 message.error(errorDetails);
                 setNodes((prev) =>
-                    prev.map((node) =>
-                        node.id === nodeId || pendingChildIds.includes(node.id)
-                            ? node.id === nodeId && !markSourceStatus
-                                ? node
-                                : {
-                                      ...node,
-                                      metadata: {
-                                          ...node.metadata,
-                                          status: NODE_STATUS_ERROR,
-                                          errorDetails,
-                                          ...(isVideoTaskFailed(error) && node.type === CanvasNodeType.Video ? { videoTaskId: undefined } : {}),
-                                      },
-                                  }
-                            : node,
-                    ),
+                    prev.map((node) => {
+                        const isTarget = pendingChildIds.includes(node.id);
+                        if (node.id === nodeId && !isTarget) {
+                            // 默认「新建节点」时，源节点只负责提供提示/参考；失败不能把源节点也标成失败
+                            return { ...node, metadata: { ...node.metadata, status: sourceStatusBefore || NODE_STATUS_SUCCESS, errorDetails: undefined } };
+                        }
+                        if (!isTarget && node.id !== nodeId) return node;
+                        return {
+                            ...node,
+                            metadata: {
+                                ...node.metadata,
+                                status: NODE_STATUS_ERROR,
+                                errorDetails,
+                                ...(isVideoTaskFailed(error) && node.type === CanvasNodeType.Video ? { videoTaskId: undefined } : {}),
+                            },
+                        };
+                    }),
                 );
             } finally {
                 finishGenerationRequest(nodeId, runController);

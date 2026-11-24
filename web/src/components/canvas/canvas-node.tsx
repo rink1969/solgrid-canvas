@@ -139,6 +139,16 @@ export const CanvasNode = React.memo(function CanvasNode({
     const isGroup = data.type === CanvasNodeType.Group;
     // 生成失败/重试时保留上一次已产出的内容，避免产物在界面上“消失”
     const hasRetainedContent = Boolean(data.metadata?.content) && data.type !== CanvasNodeType.Group && data.type !== CanvasNodeType.Config;
+    const [showRetainedError, setShowRetainedError] = useState(false);
+    useEffect(() => {
+        if (!hasRetainedContent || data.metadata?.status !== "error") {
+            setShowRetainedError(false);
+            return;
+        }
+        setShowRetainedError(true);
+        const timer = window.setTimeout(() => setShowRetainedError(false), 4000);
+        return () => window.clearTimeout(timer);
+    }, [hasRetainedContent, data.metadata?.status, data.metadata?.errorDetails]);
     const batchCount = data.type === CanvasNodeType.Image ? data.metadata?.images?.length || 0 : data.type === CanvasNodeType.Text ? data.metadata?.texts?.length || 0 : 0;
     const isBatchRoot = batchCount > 1;
     // Nodes with the interaction/move toggle ignore content pointer events in move mode and allow interaction in interactive mode.
@@ -443,7 +453,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         <div className="size-3.5 animate-spin rounded-full border-2" style={{ borderColor: theme.node.stroke, borderTopColor: theme.node.activeStroke }} />
                     </div>
                 ) : null}
-                {hasRetainedContent && data.metadata?.status === "error" ? (
+                {showRetainedError ? (
                     <div className="pointer-events-none absolute inset-x-2 bottom-2 z-20 truncate rounded-lg px-2 py-1 text-[10px] text-red-200 shadow-sm" style={{ background: "rgba(127,29,29,.82)" }} title={data.metadata?.errorDetails || t("canvas.node.failed")}>
                         生成失败 · 已保留上次结果
                     </div>
