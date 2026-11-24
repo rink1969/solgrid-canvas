@@ -13,6 +13,8 @@ description: >
 
 ## 工具
 
+> 注意：MCP 宿主可能把工具名显示成 `mcp__solgrid_canvas_<hash>__canvas_*`；按后缀 `canvas_*` 识别即可。
+
 全部通过 `solgrid-canvas` MCP 提供：
 
 | 工具 | 用途 |

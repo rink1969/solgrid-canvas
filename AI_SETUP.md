@@ -311,4 +311,6 @@ npm run dev         # 终端 2，http://localhost:3000
 | `session/close` | 删除会话或离开画布时清理 | 忽略错误 |
 | `session/request_permission` | Agent 反向请求授权 | 面板弹确认框，未确认不继续 |
 
+daemon 会把 MCP `serverName` 按「项目 + 会话」唯一化（`solgrid_canvas_<hash>`），避免旧版 ACP 把 serverName 当进程级全局键导致第二会话冲突；工具全名可能带该前缀。
+
 已验证 DSH `0.2.2-rc.5`。旧版 `@deepseek-ai/dsh-acp`（如 `0.1.7-rc.2`）可能出现 `tool_call_update` 不带 `toolCallId`、同一 `serverName` 多会话冲突；daemon 对前者按“最近一个 in_progress 工具”兜底，后者需要升级 DSH 或改用每会话唯一 serverName 的适配器。

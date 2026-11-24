@@ -1,6 +1,7 @@
 // ACP client：画布 → 本地 Agent（stdin/stdout，NDJSON JSON-RPC）。
 // 会话建立时把 canvas MCP 注入进去，Agent 一进来就有画布工具。
 import { spawn, spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -77,9 +78,12 @@ export function resolveAdapter() {
     return null;
 }
 
-function mcpEntry() {
+function mcpEntry(projectId, conversationId) {
+    // 部分 ACP 实现把 MCP serverName 当成进程级全局键；按会话唯一化，避免第二个会话/画布冲突。
+    // 哈希稳定，保证同一 conversation 的 session/resume 仍使用同一个名字。
+    const suffix = crypto.createHash("sha256").update(`${projectId}:${conversationId}`).digest("hex").slice(0, 10);
     return {
-        name: "solgrid_canvas",
+        name: `solgrid_canvas_${suffix}`,
         command: process.execPath,
         args: [MCP_PATH],
         env: [
@@ -317,7 +321,7 @@ export function createAgentManager({ broadcast, log }) {
                 let resumed = false;
                 if (sessionId) {
                     try {
-                        const result = await client.request("session/resume", { sessionId, cwd, mcpServers: [mcpEntry()] });
+                        const result = await client.request("session/resume", { sessionId, cwd, mcpServers: [mcpEntry(projectId, conversationId)] });
                         configOptions = result?.configOptions || configOptions;
                         resumed = true;
                     } catch (error) {
@@ -328,7 +332,7 @@ export function createAgentManager({ broadcast, log }) {
                 if (!sessionId) {
                     let result;
                     try {
-                        result = await client.request("session/new", { cwd, mcpServers: [mcpEntry()] });
+                        result = await client.request("session/new", { cwd, mcpServers: [mcpEntry(projectId, conversationId)] });
                     } catch (error) {
                         // 有些 ACP 实现（如 CodeBuddy）不接受 mcpServers 注入，退化为纯对话
                         log(`[acp] 会话不接受 MCP 注入，改为不带 MCP 重试：${error.message}`);
