@@ -28,6 +28,13 @@ function wanResolution(value) {
     return resolutionTier(value) >= 1080 ? "1080P" : "720P";
 }
 
+function wan3Resolution(value) {
+    const tier = resolutionTier(value);
+    if (tier >= 1080) return "1080P";
+    if (tier >= 720) return "720P";
+    return "480P";
+}
+
 // 画布视频的 size 是 "宽x高"（auto 表示自适应），据此推断平台 ratio
 function ratioFromSize(size) {
     const match = /^(\d+)[x*](\d+)$/.exec(String(size || ""));
@@ -92,6 +99,27 @@ function wanVideo({ params, mediaUrls, endpoint }) {
     return { input: { prompt, media }, parameters: { resolution, duration } };
 }
 
+// wan3.0 一个端点同时支持 t2v / 首尾帧 / 全参考；媒体用 input.media[].type 区分。
+function wan3Video({ params, mediaUrls }) {
+    const prompt = String(params.prompt || "").trim();
+    const duration = Math.max(2, Math.min(30, Math.round(Number(params.seconds) || 5)));
+    const resolution = wan3Resolution(params.resolution);
+    const referenceMode = params.videoMode === "reference" || mediaUrls.length > 2;
+    const media = mediaUrls.slice(0, referenceMode ? 10 : 2).map((url, index) => {
+        if (!referenceMode) return { type: index === 0 ? "first_frame" : "last_frame", url };
+        if (/\.(mp4|mov|webm|mkv)(\?|$)/i.test(url)) return { type: "reference_video", url };
+        if (/\.(mp3|wav|m4a|aac|ogg)(\?|$)/i.test(url)) return { type: "reference_audio", url };
+        return { type: "reference_image", url };
+    });
+    const parameters = { resolution, duration };
+    if (referenceMode) {
+        const ratio = ratioFromSize(params.size);
+        parameters.ratio = ["16:9", "4:3", "1:1", "3:4", "9:16"].includes(ratio) ? ratio : "adaptive";
+    }
+    if (params.generateAudio !== undefined) parameters.audio = params.generateAudio === "true" || params.generateAudio === true;
+    return media.length ? { input: { prompt, media }, parameters } : { input: { prompt }, parameters };
+}
+
 function seedanceVideo({ params, mediaUrls }) {
     const mode = params.videoMode === "reference" || mediaUrls.length > 2 ? "reference" : "frames";
     const content = [{ type: "text", text: String(params.prompt || "").trim() }];
@@ -143,6 +171,7 @@ function audioFamily({ params, endpoint }) {
 const FAMILIES = [
     { id: "alibaba-image", match: (provider, endpoint) => provider === "alibaba" && endpoint.startsWith("/v1/image/"), build: alibabaImage },
     { id: "alibaba-wan-video", match: (provider, endpoint) => provider === "alibaba" && /^\/v1\/video\/wan2\.7-(i2v|t2v|r2v)$/.test(endpoint), build: wanVideo },
+    { id: "alibaba-wan3-video", match: (provider, endpoint) => provider === "alibaba" && /^\/v1\/video\/wan3(\.\d+)?$/.test(endpoint), build: wan3Video },
     { id: "bytedance-seedance", match: (provider, endpoint) => provider === "bytedance" && endpoint.startsWith("/v1/video/seedance"), build: seedanceVideo },
     { id: "audio", match: (provider, endpoint) => /text-to-speech|t2a_v2|stable-audio\/text-to-audio|\/v1\/music$|\/v1\/sound-generation$/.test(endpoint), build: audioFamily },
 ];

@@ -158,6 +158,25 @@ try {
     check("视频 body 用 input.media + parameters", videoBody?.parameters?.resolution === "720P" && videoBody?.parameters?.duration === 5, JSON.stringify(videoBody).slice(0, 300));
     check("参考图经 files upload 变成 URL", videoBody?.input?.media?.[0]?.type === "first_frame" && String(videoBody?.input?.media?.[0]?.url).startsWith("https://fake.local/"), JSON.stringify(videoBody?.input?.media));
 
+    // wan3.0：单端点支持 480P，首帧图片走 input.media[].type=first_frame
+    const wan3Run = await fetch(`${BASE}/api/runs`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+            projectId: "smokeproj",
+            provider: "alibaba",
+            endpoint: "/v1/video/wan3.0",
+            params: { prompt: "wan3 测试", seconds: 5, resolution: "480", references: [`data:image/png;base64,${Buffer.from("89504e470d0a1a0a", "hex").toString("base64")}`] },
+        }),
+    }).then((r) => r.json());
+    for (let i = 0; i < 40; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        const payload = await fetch(`${BASE}/api/runs/${wan3Run.run.id}`, { headers }).then((r) => r.json());
+        if (["completed", "failed", "uncertain", "stopped"].includes(payload.run?.status)) break;
+    }
+    const wan3Body = readBodies().find((item) => item?.input?.prompt === "wan3 测试");
+    check("wan3.0 480P + first_frame 映射", wan3Body?.parameters?.resolution === "480P" && wan3Body?.parameters?.duration === 5 && wan3Body?.input?.media?.[0]?.type === "first_frame", JSON.stringify(wan3Body).slice(0, 300));
+
     // seedance：vquality "480" → "480p"，size 640x480 → ratio 4:3（reference 模式）
     const seedanceRun = await fetch(`${BASE}/api/runs`, {
         method: "POST",
