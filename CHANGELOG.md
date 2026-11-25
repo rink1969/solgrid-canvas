@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## 0.1.4 - 2026-11-25
 
 + [修复] 文生音频等端点的 `output` 为数组/嵌套对象时没有识别产物：递归解析 `audio`/`data`/`output` 等形状；平台 completed 但没有产物时改为 failed，不再返回空结果。
 

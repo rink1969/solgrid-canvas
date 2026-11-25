@@ -17,7 +17,7 @@ import { skeletonFromSchema } from "./raw-body.mjs";
 import { createGateway } from "./gateway.mjs";
 import { createRunEngine } from "./runs.mjs";
 
-const VERSION = "0.1.3";
+const VERSION = "0.1.4";
 const WEB_DIST = process.env.CANVAS_WEB_DIST || path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")), "..", "web", "dist");
 const MIME = {
     ".html": "text/html; charset=utf-8",
