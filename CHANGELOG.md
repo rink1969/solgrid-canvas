@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## Unreleased
+
++ [修复] Agent/MCP 修改节点提示词后，已打开的提示词面板会同步新内容，不再用旧本地草稿覆盖回归。
+
 ## 0.1.2 - 2026-11-25
 
 + [调整] 移除 GitHub Actions 的 Docker 镜像构建 workflow。
