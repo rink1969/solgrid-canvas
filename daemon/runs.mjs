@@ -162,6 +162,7 @@ export function createRunEngine({ store, gateway, projectsDir, bodyDir, broadcas
 
     function guessMime(item) {
         if (item.mime) return item.mime;
+        if (item.content_type) return item.content_type;
         if (item.hint === "images") return "image/png";
         if (item.hint === "videos") return "video/mp4";
         if (item.hint === "audios" || item.hint === "audio" || item.hint === "music") return "audio/mpeg";
@@ -249,6 +250,9 @@ export function createRunEngine({ store, gateway, projectsDir, bodyDir, broadcas
                     outputs = await collectOutputs(run, current.raw);
                 } catch (error) {
                     return fail(run, `产物落地失败：${error.message}`, "failed");
+                }
+                if (!outputs.length) {
+                    return fail(run, "平台没有返回产物", "failed");
                 }
                 const { cost, billingStatus } = pickCost(current.raw);
                 const updated = store.update(run.id, {

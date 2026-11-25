@@ -181,18 +181,40 @@ function asItem(value, hint) {
 export function pickOutputs(raw) {
     const value = raw?.output || raw?.run?.output || raw?.data?.output || raw?.data || raw || {};
     const items = [];
-    for (const key of ["images", "videos", "audios", "files", "audio", "music"]) {
-        const candidate = value[key];
-        if (candidate == null) continue;
-        const list = Array.isArray(candidate) ? candidate : [candidate];
-        for (const entry of list) {
-            const item = asItem(entry, key);
+    const knownKeys = ["images", "videos", "audios", "files", "audio", "music"];
+
+    // 平台不同端点的 output 形状不统一：可能是 {audio:[{base64}]}，
+    // 也可能是 [{audio:[...]}]，或者是 {data:{audio:...}}。统一递归收集。
+    const collect = (node, hint) => {
+        if (node == null) return;
+        if (Array.isArray(node)) {
+            node.forEach((entry) => collect(entry, hint));
+            return;
+        }
+        if (typeof node === "string") {
+            const item = asItem(node, hint);
+            if (item) items.push(item);
+            return;
+        }
+        if (typeof node !== "object") return;
+        let nested = false;
+        for (const key of knownKeys) {
+            if (node[key] == null) continue;
+            nested = true;
+            collect(node[key], key);
+        }
+        for (const key of ["data", "output", "result", "results"]) {
+            if (node[key] == null) continue;
+            nested = true;
+            collect(node[key], hint);
+        }
+        if (!nested) {
+            const item = asItem(node, hint);
             if (item) items.push(item);
         }
-    }
-    // 有些厂商把音频塞在 data.audio（hex 字符串）
-    const nested = asItem(value.data?.audio, "audio");
-    if (nested) items.push(nested);
+    };
+
+    collect(value);
     return items;
 }
 
