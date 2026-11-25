@@ -1,6 +1,8 @@
 # CHANGELOG
 
-## Unreleased
+## 0.1.2 - 2026-11-25
+
++ [调整] 移除 GitHub Actions 的 Docker 镜像构建 workflow。
 
 + [修复] 悬浮的 Agent 面板支持按住顶部「拖动窗口」自由移动，位置持久化并限制在视口内。
 
