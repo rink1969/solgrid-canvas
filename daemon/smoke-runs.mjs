@@ -342,6 +342,11 @@ try {
     const imageNodes = projectAfterMulti.project.nodes.filter((node) => node.type === "image");
     check("数量 N 多产物都落画布", imageNodes.length === 3, `image nodes=${imageNodes.length}`);
     check("多产物都带 assetId", imageNodes.every((node) => String(node.metadata?.storageKey || "").startsWith("asset:smokeproj/")));
+    const extraNodes = projectAfterMulti.project.nodes.filter((node) => String(node.id).startsWith("run-"));
+    check("多产物节点带生成参数", extraNodes.length === 2 && extraNodes.every((node) => node.metadata?.size === "1024x1024" && node.metadata?.count === 1), JSON.stringify(extraNodes.map((node) => node.metadata?.size)));
+    check("多产物节点按产物比例建版", extraNodes.every((node) => Math.abs(node.width / node.height - 1) < 0.01), JSON.stringify(extraNodes.map((node) => [node.width, node.height])));
+    const sourceTitle = imageNodes.find((node) => !String(node.id).startsWith("run-"))?.title || "";
+    check("多产物节点复用原标题", extraNodes.map((node) => node.title).join("|") === `${sourceTitle} -1|${sourceTitle} -2`, JSON.stringify(extraNodes.map((node) => node.title)));
 
     // 审批：Agent 请求 → 用户允许 → 才会入队
     const approval = await fetch(`${BASE}/api/approvals`, {

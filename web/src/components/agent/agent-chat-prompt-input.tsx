@@ -28,6 +28,7 @@ export function AgentChatPromptInput({ value, disabled, placeholder, theme, onCh
     const lastEmittedRef = useRef(value);
     const canvasReferences = useAgentStore((state) => state.canvasReferences);
     const [command, setCommand] = useState<ComposerCommand | null>(null);
+    const [composing, setComposing] = useState(false);
     const [activeIndex, setActiveIndex] = useState(0);
     const [resourceCandidates, setResourceCandidates] = useState<CanvasResourceReference[]>([]);
     const [referenceHover, setReferenceHover] = useState<ReferenceHover | null>(null);
@@ -128,7 +129,7 @@ export function AgentChatPromptInput({ value, disabled, placeholder, theme, onCh
 
     return (
         <div ref={containerRef} className="relative">
-            {!value.trim() ? <div className="pointer-events-none absolute left-1 top-1 text-sm leading-6" style={{ color: theme.node.placeholder }}>{placeholder}</div> : null}
+            {composing || value.trim() ? null : <div className="pointer-events-none absolute left-1 top-1 text-sm leading-6" style={{ color: theme.node.placeholder }}>{placeholder}</div>}
             <div
                 ref={editorRef}
                 contentEditable={!disabled}
@@ -141,9 +142,13 @@ export function AgentChatPromptInput({ value, disabled, placeholder, theme, onCh
                 onInput={() => {
                     if (!composingRef.current) syncFromEditor();
                 }}
-                onCompositionStart={() => { composingRef.current = true; }}
+                onCompositionStart={() => {
+                    composingRef.current = true;
+                    setComposing(true);
+                }}
                 onCompositionEnd={() => {
                     composingRef.current = false;
+                    setComposing(false);
                     syncFromEditor();
                 }}
                 onPaste={(event) => {

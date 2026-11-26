@@ -165,21 +165,29 @@ export function createRunEngine({ store, gateway, projectsDir, bodyDir, broadcas
             const source = project?.nodes?.find((node) => node.id === run.nodeId);
             const baseX = source ? source.position.x + source.width + 320 : 0;
             const baseY = source ? source.position.y : 0;
+            const presetWidth = Math.min(480, Math.max(160, source?.width || 320));
+            const sourceTitle = String(source?.title || run.body?.prompt || "生成结果").trim();
             extras.forEach((output, index) => {
                 const size = output.mime?.startsWith("image/") ? imageSizeOf(run, output) : null;
-                const width = size ? Math.min(480, Math.max(160, Math.round((size.width / size.height) * 320))) : 320;
-                const height = size ? 320 : 320;
+                const width = size ? presetWidth : 320;
+                const height = size ? Math.round(presetWidth * (size.height / size.width)) : 320;
                 const type = output.mime?.startsWith("video/") ? "video" : output.mime?.startsWith("audio/") ? "audio" : "image";
                 ops.push({
                     type: "add_node",
                     node: {
                         id: `run-${run.id}-${index + 1}`,
                         type,
-                        title: (run.body?.prompt || "生成结果").slice(0, 24),
+                        title: `${sourceTitle} -${index + 1}`,
                         position: { x: baseX, y: baseY + index * (height + 32) },
                         width,
                         height,
-                        metadata: nodeMetadata(run, output),
+                        metadata: {
+                            ...nodeMetadata(run, output),
+                            // 多产物节点也要带生成参数，否则面板按默认（1:1）显示，和真实产物不一致
+                            ...(run.body?.size ? { size: run.body.size } : {}),
+                            count: 1,
+                            generationMode: type,
+                        },
                     },
                 });
             });

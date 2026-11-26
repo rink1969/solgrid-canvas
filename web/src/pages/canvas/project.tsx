@@ -2687,14 +2687,24 @@ function InfiniteCanvasPage() {
                                 metadata = imageMetadata({ url: item.url, storageKey: item.storageKey, width: meta.width, height: meta.height, bytes: item.bytes, mimeType: item.mime });
                             }
                             const type = item.mime?.startsWith("video/") ? CanvasNodeType.Video : item.mime?.startsWith("audio/") ? CanvasNodeType.Audio : CanvasNodeType.Image;
-                            created.push(
-                                createCanvasNode(type, { x: sourceNode.position.x + sourceNode.width + 360 + index * 40, y: sourceNode.position.y + sourceNode.height / 2 + index * 360 }, {
+                            // 多产物节点按产物真实宽高比建节点，并带上生成参数，避免面板显示成默认 1:1
+                            const width = sourceNode.width || NODE_DEFAULT_SIZE[type].width;
+                            const ratio = metadata.naturalWidth && metadata.naturalHeight ? metadata.naturalWidth / metadata.naturalHeight : 1;
+                            const height = Math.round(width / ratio);
+                            const left = sourceNode.position.x + sourceNode.width + 320;
+                            const top = sourceNode.position.y + index * (height + 32);
+                            created.push({
+                                ...createCanvasNode(type, { x: left + width / 2, y: top + height / 2 }, {
                                     ...metadata,
+                                    ...(sourceNode.metadata?.size ? { size: sourceNode.metadata.size } : {}),
+                                    count: 1,
+                                    generationMode: type,
                                     prompt: context.prompt,
                                     provider,
                                     endpoint,
                                 }),
-                            );
+                                title: `${sourceNode.title || context.prompt.slice(0, 24) || "生成结果"} -${index + 1}`,
+                            });
                         }
                         if (created.length) setNodes((prev) => [...prev, ...created]);
                     }
