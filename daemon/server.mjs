@@ -731,7 +731,8 @@ async function handle(req, res) {
     if (assetGc && req.method === "POST") {
         let body = {};
         try {
-            body = JSON.parse(await readBody(req));
+            const raw = await readBody(req);
+            if (raw.trim()) body = JSON.parse(raw);
         } catch (error) {
             return sendJson(res, 400, { error: "invalid_json", message: error.message });
         }

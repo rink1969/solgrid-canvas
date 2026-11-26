@@ -61,11 +61,16 @@ CANVAS_TOKEN=<daemon.json 里的 token>
 | GET | `/api/projects/:id` | 单项目 |
 | POST | `/api/projects/:id/ops` | 增量 op（add_node / update_node / remove_nodes / add_edge / remove_edges / update_meta / move_nodes），带 `expectRev` |
 | GET | `/api/projects/:id/ops` | op 日志（最近 N 条） |
-| PUT | `/api/projects/:id` | 保存项目（body: `{project}`），返回 `rev` |
+| PUT | `/api/projects/:id` | 保存项目（body: `{project, expectRev?}`）；已有项目必须带 `expectRev` |
 | DELETE | `/api/projects/:id` | 删除项目目录 |
 | GET | `/api/events?client=<id>` | SSE：`project.updated` / `project.deleted` / `run.updated` |
 | POST | `/api/projects/:id/assets?mime=…` | 上传二进制，返回 `{assetId,file,bytes}` |
 | GET | `/api/projects/:id/assets/:file` | 读取资产（支持 Range） |
+| POST | `/api/projects/:id/assets/gc` | 清理孤儿资产；默认保留 7 天内文件 |
+| GET / PUT | `/api/settings` | 偏好设置；当前含 `agentAutoApprove`（PUT 仅画布 UI） |
+| GET | `/api/approvals` | pending 审批列表 |
+| POST | `/api/approvals/:id/decision` | 审批决策（仅画布 UI） |
+| GET | `/api/agent/permissions` | 当前 ACP 权限请求（前端轮询兜底） |
 | GET | `/api/tools?q=…` | `solgrid tools list -q` 结果（缓存 24h） |
 | GET | `/api/tools/detail?provider=&endpoint=` | `solgrid inspect` 契约（缓存 24h） |
 | POST | `/api/runs` | 入队生成：`{projectId,nodeId?,provider,endpoint,params}`；`params` 是画布语义（prompt/size/references/seconds/resolution…），`params.rawBody` 可直接给请求体 |
@@ -83,7 +88,7 @@ CANVAS_TOKEN=<daemon.json 里的 token>
 node bin/solgrid-canvas.mjs install --agent codex|claude|dsh
 ```
 
-注册的是 stdio MCP：`node daemon/mcp.mjs`。它不重复实现业务，全部转发给 daemon；daemon 没起时会自动拉起。工具包括 `canvas_get_state` / `canvas_apply_ops` / `canvas_place_artifacts` / `canvas_import_local` / `canvas_run_nodes` / `canvas_watch_run` / `canvas_cancel_run` 等。
+注册的是 stdio MCP：`node daemon/mcp.mjs`。它不重复实现业务，全部转发给 daemon；daemon 没起时会自动拉起。工具包括 `canvas_get_state` / `canvas_apply_ops` / `canvas_place_artifacts` / `canvas_import_local` / `canvas_run_nodes` / `canvas_get_approval` / `canvas_wait_approval` / `canvas_watch_run` / `canvas_cancel_run` 等。
 
 ## 元信息
 
@@ -153,3 +158,12 @@ node daemon/smoke-runs.mjs  # run 队列 / 产物落地 / 记账（用假 CLI，
 
 `smoke-runs.mjs` 通过 `CANVAS_SOLGRID_BIN` 指向 `daemon/test/fake-solgrid.mjs`，不联网、不扣费。
 真实 CLI 路径由 `CANVAS_SOLGRID_BIN` 默认值 `solgrid` 使用；Windows 上经 shell 执行 `.cmd`，进入命令行的参数都会先做字符白名单校验。
+
+
+## 浏览器 E2E
+
+```bash
+CANVAS_BASE=http://127.0.0.1:17371 CANVAS_PROJECT=<id> node daemon/e2e-browser.mjs
+```
+
+只读真实画布页面，不发起生成；无 Chrome 时用 `CHROME_PATH` 指定。

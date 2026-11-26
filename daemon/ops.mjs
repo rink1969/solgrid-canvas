@@ -42,6 +42,10 @@ function normalizeGeometry(node, current) {
     };
     delete next.x;
     delete next.y;
+    if (next.metadata !== undefined) {
+        ensure(next.metadata === null || (typeof next.metadata === "object" && !Array.isArray(next.metadata)), "metadata 必须是对象");
+        if (next.metadata === null) next.metadata = {};
+    }
     if (next.width !== undefined || current) next.width = normalizeDimension(next.width, "width", current?.width ?? 320);
     if (next.height !== undefined || current) next.height = normalizeDimension(next.height, "height", current?.height ?? 240);
     return next;

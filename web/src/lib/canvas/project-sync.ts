@@ -144,8 +144,8 @@ async function syncProject(project: CanvasProject) {
             synced.set(project.id, project.updatedAt);
             return;
         } catch (error) {
-            // rev 冲突：拉最新文档，把本地 op 重放到新基线上再试，避免整份 PUT 覆盖别人的改动
-            console.warn("[canvas-sync] op 同步冲突，重放到最新文档", project.id, error);
+    // 多次冲突：保留本地，刷新基准供下一次保存重放
+    console.warn("[canvas-sync] 多次冲突，保留本地等待下一次保存", project.id);
             const fresh = await daemonApi.getProject(project.id);
             revs.set(project.id, revOf(fresh));
             snapshot.set(project.id, fresh);
@@ -159,7 +159,10 @@ async function syncProject(project: CanvasProject) {
 
     // 连续冲突：采纳远端，避免用旧文档覆盖服务端
     console.warn("[canvas-sync] 多次冲突，采纳服务端最新文档", project.id);
-    await refreshProject(project.id);
+    const fresh = await daemonApi.getProject(project.id);
+    revs.set(project.id, revOf(fresh));
+    snapshot.set(project.id, fresh);
+    synced.delete(project.id);
 }
 
 async function refreshProject(id: string) {

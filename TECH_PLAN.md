@@ -4,6 +4,8 @@
 > **基线已切换**：放弃 solgrid fork，直接从上游拉代码。fork 相对上游只多两个 commit（solgrid 渠道预设/脚本、拉片插件），二者都不继承；有价值的是**实测知识**，已移植到 `notes/`（`solgrid-findings.md`、`lapian-methodology.md`）。
 > 结论先行，细节在后。所有"实测"结论都有出处（`notes/solgrid-findings.md`、CLI `tools list/categories` / `inspect` 实跑、源码核对）。
 
+> **现状更新（2026-11-26）**：花费确认已改为 daemon 异步审批（`approvalId` / `canvas_get_approval` / `canvas_wait_approval`），审批状态持久化；`confirmToken` 和同步 `session/request_permission` 是早期设计，文中相关段落保留为背景，不再作为实现依据。全量 PUT 已要求 `expectRev`，run 回填有 `doc_ops` 补偿。
+
 ---
 
 ## 0. 结论摘要

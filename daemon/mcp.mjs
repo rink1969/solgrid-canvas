@@ -455,7 +455,8 @@ const HANDLERS = {
 
         const prepared = [];
         for (const item of items) {
-            const kind = ["image", "video", "audio", "text"].includes(item.kind) ? item.kind : "text";
+            const kind = item.kind;
+            if (!["image", "video", "audio", "text"].includes(kind)) throw new Error(`不支持的产物 kind：${kind}`);
             if (kind === "text") {
                 if (!item.text) throw new Error("text 产物需要 text 字段");
                 prepared.push({ kind, title: item.title || "文本", text: item.text });

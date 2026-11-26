@@ -61,12 +61,18 @@ export function createApprovalStore({ engine, broadcast, log, autoApprove, state
             expiryTimers.delete(id);
         }
         if (allow) {
-            item.runs = item.items.map((job) =>
-                engine.enqueue({ projectId: item.projectId, nodeId: job.nodeId, provider: job.provider, endpoint: job.endpoint, body: job.params }),
-            );
-            item.run = item.runs[0] || null;
-            item.status = "approved";
-            log(`审批通过：${item.provider} ${item.endpoint}（${item.runs.length} 个 run）`);
+            try {
+                item.runs = item.items.map((job) =>
+                    engine.enqueue({ projectId: item.projectId, nodeId: job.nodeId, provider: job.provider, endpoint: job.endpoint, body: job.params }),
+                );
+                item.run = item.runs[0] || null;
+                item.status = "approved";
+                log(`审批通过：${item.provider} ${item.endpoint}（${item.runs.length} 个 run）`);
+            } catch (error) {
+                item.status = "failed";
+                item.error = error.message;
+                log(`审批入队失败：${error.message}（已入队 ${item.runs.length} 个 run）`);
+            }
         } else {
             item.runs = [];
             item.status = "denied";

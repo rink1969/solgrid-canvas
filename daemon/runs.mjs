@@ -106,6 +106,11 @@ export function createRunEngine({ store, gateway, projectsDir, bodyDir, broadcas
     function retryDocOps() {
         if (!docStore || !docOps) return;
         for (const item of docOps.list()) {
+            if (item.attempts >= 20) {
+                log(`run ${item.id} 回填画布补偿超过 20 次，停止重试；原始 ops 已保留在 doc_ops`);
+                docOps.remove(item.id);
+                continue;
+            }
             try {
                 const result = applyOps(docStore, item.projectId, item.ops);
                 opLog?.append(item.projectId, item.ops, "daemon");

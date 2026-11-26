@@ -2,6 +2,16 @@
 
 ## Unreleased
 
++ [修复] run 完成后回填画布失败会进入 SQLite `doc_ops` 队列，5 秒后重试，daemon 重启后继续补偿；超过 20 次停止重试并保留原始 ops。
++ [优化] catalog 首次冷启动增加 in-flight 合并，多个页面同时打开只跑一次 `tools categories/list`；`tools:q:v2` 查询缓存超过 24h 自动清理。
++ [新增] `POST /api/projects/:id/assets/gc`：按画布/聊天/timeline 引用和 7 天保护清理孤儿资产。
++ [修复] 全量 PUT 已存在画布必须带 `expectRev`；节点 metadata 必须是对象，避免错误结构静默落库。
++ [修复] MCP `canvas_apply_ops` / `canvas_place_artifacts` schema 改为 `oneOf`；未知产物 kind 直接报错，不再静默降级为文本。
++ [新增] 审批服务端成本估算与 `maxCostSpark`；超过上限 400，单次审批最多 50 个节点。
++ [修复] 平台 cost 对象 `{value,currency}` 正确解析为 `costSpark`；运行详情按额度/登录/超时/不可用/参数给出降级提示。
++ [修复] 浮动 Agent 面板支持高度调整，移除整行拖动条；浏览器 E2E 验证 440×720。
++ [修复] Agent 面板挂载时查询 ACP 状态，避免顶部「已连接」与面板「未连接」不一致。
++ [测试] 新增 `daemon/e2e-browser.mjs` 浏览器 E2E 脚本；真实图片、视频、审批弹窗、设置开关、重启恢复均验证。
 + [新增] 偏好设置新增「允许 Agent 自动发起生成」开关；开启后 MCP 生成请求自动通过审批，每日花费上限由 solgrid 平台控制。
 + [修复] ACP `request_permission` 增加可查询权限列表与前端轮询兜底，权限决策只允许画布 UI 确认。
 + [修复] 统一画布写入校验：全量 PUT 与 ops 共用节点/连线/几何校验，已有画布 PUT 必须带 expectRev。

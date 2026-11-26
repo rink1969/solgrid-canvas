@@ -114,6 +114,22 @@
 
 - 创建 pending approval → 杀 daemon → 重启 → pending 仍可查询 → 拒绝成功
 
+
+## 六、代码审计新增（2026-11-26）
+
+| ID | 潜在问题 | 状态 | 说明 |
+|---|---|---|---|
+| F1 | 节点 `metadata` 未校验，字符串/数组会静默落库 | 完成 | `normalizeGeometry` 增加 metadata 对象校验；坏结构 400 |
+| F2 | `canvas_place_artifacts` 未知 kind 静默降级为 text | 完成 | 未知 kind 直接报错，不再写入错误节点 |
+| F3 | 资产 GC 空 body 被当成非法 JSON | 完成 | 空 body 使用默认 7 天保护参数 |
+| F4 | `doc_ops` 永久失败会每 5 秒无限重试 | 完成 | 超过 20 次停止并保留原始 ops，日志记录 |
+| F5 | 审批批量入队中途失败会留下 pending | 完成 | 入队异常标记 `failed`，保留已入队 runs 和 error |
+| F6 | project-sync 连续冲突 3 次后拉远端覆盖，可能丢本地未保存修改 | 完成 | 改为保留本地、刷新服务端基准并等待下一次保存；不再静默覆盖 |
+| F7 | `x-canvas-client: web` 可被本机 Agent 伪造 | 已知边界 | 能挡住普通 MCP token 路径；同用户恶意进程属于 OS 信任边界，不声称是硬隔离 |
+| F8 | 显式资产 GC 会把“仅在我的资产里、未在画布引用”的 7 天前文件清掉 | 已知限制 | GC 默认 7 天保护，且需用户/脚本显式调用；不要把它当自动清理 |
+| F9 | `maxCostSpark` 需要 catalog 价格缓存，否则无法估算并拒绝 | 预期行为 | 先用 `/api/tools/catalog` 预热；错误信息明确 |
+| F10 | 错误降级提示只在运行详情显示，节点错误角标仍只显示原文 | 完成 | 节点错误内容也追加同一套降级提示 |
+
 ## 五、当前验证基线
 
 - `npm --prefix web run typecheck`：通过
@@ -122,4 +138,4 @@
 - `node daemon/smoke-mcp.mjs`：通过
 - `node daemon/smoke-agent.mjs`：通过
 - 真实图片 / 视频 / 浏览器 E2E：通过
-- 待补：无。A1–A7、D1–D24（D5/D17/S01 不适用）、E1–E4 均已关闭。
+- 待补：无。A1–A7、D1–D24（D5/D17/S01 不适用）、E1–E4、F1–F10 均已处理；F7/F8/F9 是已知边界/限制。
