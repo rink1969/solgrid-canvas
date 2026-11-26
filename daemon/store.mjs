@@ -97,6 +97,25 @@ function fromEdge(edge) {
     return { id: edge.id, fromNodeId: edge.fromNode, toNodeId: edge.toNode };
 }
 
+function collectAssetFiles(value, projectId, files) {
+    if (typeof value === "string") {
+        const keyPrefix = `asset:${projectId}/`;
+        const urlPrefix = `/api/projects/${projectId}/assets/`;
+        if (value.startsWith(keyPrefix)) files.add(value.slice(keyPrefix.length).split(/[?#]/)[0]);
+        const index = value.indexOf(urlPrefix);
+        if (index >= 0) files.add(value.slice(index + urlPrefix.length).split(/[?#]/)[0]);
+        return files;
+    }
+    if (Array.isArray(value)) {
+        for (const item of value) collectAssetFiles(item, projectId, files);
+        return files;
+    }
+    if (value && typeof value === "object") {
+        for (const item of Object.values(value)) collectAssetFiles(item, projectId, files);
+    }
+    return files;
+}
+
 export function createStore(root) {
     const projectsDir = path.join(root, "projects");
 
@@ -171,6 +190,38 @@ export function createStore(root) {
         return { rev, stripped: counter.n, dir };
     }
 
+    function cleanupOrphanAssets(id, { minAgeMs = 7 * 24 * 60 * 60 * 1000 } = {}) {
+        const project = readProject(id);
+        if (!project) throw new Error("项目不存在");
+        const referenced = new Set();
+        collectAssetFiles(project.nodes, id, referenced);
+        collectAssetFiles(project.chatSessions, id, referenced);
+        const timelineFile = path.join(projectDir(id), "timeline.json");
+        try {
+            if (fs.existsSync(timelineFile)) collectAssetFiles(JSON.parse(fs.readFileSync(timelineFile, "utf8")), id, referenced);
+        } catch {
+            /* timeline 损坏时不要误删资产 */
+            throw new Error("timeline.json 无法解析，已停止资产清理");
+        }
+        const dir = path.join(projectDir(id), "assets");
+        if (!fs.existsSync(dir)) return { deleted: 0, kept: 0 };
+        let deleted = 0;
+        let kept = 0;
+        for (const file of fs.readdirSync(dir)) {
+            if (file.startsWith(".upload-")) continue;
+            const absolute = path.join(dir, file);
+            const stat = fs.statSync(absolute);
+            if (!stat.isFile()) continue;
+            if (referenced.has(file) || Date.now() - stat.mtimeMs < minAgeMs) {
+                kept += 1;
+                continue;
+            }
+            fs.rmSync(absolute, { force: true });
+            deleted += 1;
+        }
+        return { deleted, kept };
+    }
+
     function deleteProject(id) {
         const dir = projectDir(id);
         if (!fs.existsSync(dir)) return false;
@@ -178,7 +229,7 @@ export function createStore(root) {
         return true;
     }
 
-    return { root, projectsDir, listProjects, readProject, saveProject, deleteProject };
+    return { root, projectsDir, listProjects, readProject, saveProject, deleteProject, cleanupOrphanAssets };
 }
 
 export function hashId(text) {

@@ -22,7 +22,7 @@
 | A1 | run completed 后 `applyDocOps` 回填画布失败只打日志，无重试/补偿，node 可能永远不更新 | P0 | 完成 | `doc_ops` SQLite 队列 + 5s 重试 + 启动恢复；smoke：先跑 ghost 节点失败，再补节点后自动 success |
 | A2 | 审批没有本地成本预估、`maxCostSpark`、批量上限；只依赖平台每日额度 | P1 | 完成 | 服务端/UI 都显示 catalog 估算；单次 50 节点上限；`canvas_run_nodes` / `/api/approvals` 支持 `maxCostSpark`，超限 400；smoke 通过 |
 | A3 | catalog 首次未命中时多标签/多入口并发重复执行 `tools categories + list`；`tools:q` 缓存 key 无清理 | P1 | 完成 | 并发冷启动测试：categories 调用 1 次、第二个请求 cached=true；并清理超过 24h 的 `tools:q:v2:` 缓存 |
-| A4 | 资产上传无大小上限；失败 ops/run 留下孤儿资产 | P1 | 部分完成 | 已有 1GB 上传上限（原有 `MAX_BYTES`）并拒绝 AVIF/SVG；孤儿资产 GC 仍未做 |
+| A4 | 资产上传无大小上限；失败 ops/run 留下孤儿资产 | P1 | 完成 | 已有 1GB 上传上限并拒绝 AVIF/SVG；新增 `POST /api/projects/:id/assets/gc`，按画布/聊天/timeline 引用和默认 7 天保护清理孤儿；smoke 通过 |
 | A5 | 浏览器 E2E 只存在于 workspace 临时脚本，未纳入仓库回归 | P1 | 完成 | 新增 `daemon/e2e-browser.mjs`，已对真实项目跑通图片渲染；无异常 |
 | A6 | MCP `canvas_apply_ops` 等 schema 仍是宽松 `array of object`，缺 `oneOf` 结构化校验 | P0 | 完成 | `canvas_apply_ops` 7 种 op 与 `canvas_place_artifacts` 的 oneOf schema 已落地；`smoke-mcp` 校验通过 |
 | A7 | 浏览器顶部显示「本地 Agent 已连接」，右侧 Agent 面板显示「本地 Agent 未连接」，状态来源不一致 | P2 | 完成 | 面板 Tag 改为 `检测中 / 已连接 / 未连接`，并挂载时查询 ACP 状态；通用浏览器 harness 复验显示 `dsh` |
@@ -50,7 +50,7 @@
 | D19 | 思考/工具调用逐条平铺，不折叠、无耗时 | 完成 | transcript 时间戳 + 过程折叠 + 单条耗时；`smoke-agent` |
 | D20 | 视频节点没有「查看大图」 | 完成 | 浏览器 E2E：`<video>` 1280×720、readyState 4；工具栏/侧栏预览代码 |
 | D21 | 审批请求可能不弹窗 | 完成 | 审批 3s 轮询；浏览器 E2E 实际拉起弹窗 |
-| D22 | 浮动 Agent 窗口不能整体缩放，顶部拖动行占空间 | 完成（代码，待交互复验） | 高度可拖拽、小把手；类型检查 |
+| D22 | 浮动 Agent 窗口不能整体缩放，顶部拖动行占空间 | 完成 | 浏览器 E2E 打开 Agent → 悬浮，面板 440×720，旧「拖动窗口」行不存在；高度调整/把手代码 |
 | D23 | `update_meta/viewport` 无文档、无回读 | 完成 | MCP 描述 + `get_state` 返回 viewport |
 | D24 | 新对话没有模型选择器 | 完成 | `prepareConversation` + 前端 prepare；`smoke-agent` 已验证 prepare 返回 configOptions |
 
@@ -93,6 +93,10 @@
 - 结果：MP4 1,030,431 bytes；H.264 1280×720 / 2.00s；AAC 2.02s
 - 费用：首次平台 `runs list` 26 Spark；cost 修复后重跑 daemon 回读 `costSpark=26`
 
+### 2026-11-26 浮动面板
+
+- Chrome Headless 点击 Agent → 悬浮：面板 440×720，`拖动窗口` 文本不存在，无异常
+
 ### 2026-11-26 并发目录冷启动
 
 - 两个并发 `/api/tools/catalog`：`tools categories` 只调用 1 次，第二个请求 `cached=true`
@@ -118,4 +122,4 @@
 - `node daemon/smoke-mcp.mjs`：通过
 - `node daemon/smoke-agent.mjs`：通过
 - 真实图片 / 视频 / 浏览器 E2E：通过
-- 待补：A4 的孤儿 GC；D22 浏览器面板交互复验
+- 待补：无（D5/D17/S01 已标注不适用）

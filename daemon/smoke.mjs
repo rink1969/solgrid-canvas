@@ -141,6 +141,12 @@ try {
     const rangeResponse = await fetch(`${BASE}/api/projects/smoke1/assets/${first.json.file}`, { headers: { "x-canvas-token": TOKEN, range: "bytes=0-7" } });
     check("Range 请求", rangeResponse.status === 206 && (rangeResponse.headers.get("content-range") || "").startsWith("bytes 0-7/"));
 
+    const orphanPath = path.join(HOME, "projects", "smoke1", "assets", first.json.file);
+    const oldTime = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    fs.utimesSync(orphanPath, oldTime, oldTime);
+    const gc = await api("POST", "/api/projects/smoke1/assets/gc", { minAgeHours: 1 });
+    check("孤儿资产 GC", gc.status === 200 && gc.json.deleted >= 1 && !fs.existsSync(orphanPath), JSON.stringify(gc.json));
+
     const removed = await api("DELETE", "/api/projects/smoke1");
     check("删除项目", removed.status === 200 && !fs.existsSync(path.join(HOME, "projects", "smoke1")));
     check("删除后列表为空", (await api("GET", "/api/projects")).json?.projects?.length === 0);

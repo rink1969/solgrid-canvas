@@ -727,6 +727,24 @@ async function handle(req, res) {
     }
 
     // 资产读取：支持 Range（视频拖动进度必需）
+    const assetGc = pathname.match(/^\/api\/projects\/([A-Za-z0-9_-]{1,64})\/assets\/gc$/);
+    if (assetGc && req.method === "POST") {
+        let body = {};
+        try {
+            body = JSON.parse(await readBody(req));
+        } catch (error) {
+            return sendJson(res, 400, { error: "invalid_json", message: error.message });
+        }
+        const minAgeHours = Math.max(1, Number(body?.minAgeHours) || 168);
+        try {
+            const result = store.cleanupOrphanAssets(assetGc[1], { minAgeMs: minAgeHours * 60 * 60 * 1000 });
+            log(`项目 ${assetGc[1]} 资产清理：删除 ${result.deleted}，保留 ${result.kept}`);
+            return sendJson(res, 200, { ...result, minAgeHours });
+        } catch (error) {
+            return sendJson(res, 400, { error: "asset_gc_failed", message: error.message });
+        }
+    }
+
     const assetGet = pathname.match(/^\/api\/projects\/([A-Za-z0-9_-]{1,64})\/assets\/([a-f0-9]{64}\.[a-z0-9]{2,5})$/);
     if (assetGet && req.method === "GET") {
         serveAsset(req, res, store.projectsDir, assetGet[1], assetGet[2]);
