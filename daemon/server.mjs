@@ -14,6 +14,7 @@ import { createApprovalStore } from "./approvals.mjs";
 import { createAgentManager } from "./acp.mjs";
 import { createVideoEditManager } from "./video-edit.mjs";
 import { skeletonFromSchema } from "./raw-body.mjs";
+import { estimateSpark, findCatalogPrice } from "./cost.mjs";
 import { createGateway } from "./gateway.mjs";
 import { createRunEngine } from "./runs.mjs";
 
@@ -572,7 +573,20 @@ async function handle(req, res) {
                     if (typeof node?.metadata?.prompt === "string") params.prompt = node.metadata.prompt;
                 }
             }
-            items.push({ nodeId: jobNodeId, provider: jobProvider, endpoint: jobEndpoint, params });
+            const price = findCatalogPrice(catalog.get("catalog:v3", CATALOG_TTL_MS), jobProvider, jobEndpoint);
+            const estimatedSpark = estimateSpark(price, {
+                outputs: Number(params.count) || 1,
+                seconds: Number(params.seconds) || 0,
+                resolution: typeof params.resolution === "string" ? params.resolution : "",
+                references: Array.isArray(params.references) ? params.references.length : 0,
+            });
+            items.push({ nodeId: jobNodeId, provider: jobProvider, endpoint: jobEndpoint, params, estimatedSpark });
+        }
+        const estimatedTotal = items.every((item) => typeof item.estimatedSpark === "number") ? Math.round(items.reduce((sum, item) => sum + item.estimatedSpark, 0) * 100) / 100 : null;
+        const maxCostSpark = Number(body?.maxCostSpark);
+        if (Number.isFinite(maxCostSpark) && maxCostSpark > 0) {
+            if (estimatedTotal === null) return sendJson(res, 400, { error: "cost_unavailable", message: "无法估算本次费用，不能应用 maxCostSpark" });
+            if (estimatedTotal > maxCostSpark) return sendJson(res, 400, { error: "cost_limit_exceeded", message: `预计 ${estimatedTotal} Spark，超过上限 ${maxCostSpark} Spark` });
         }
         let approval;
         try {

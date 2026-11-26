@@ -100,6 +100,7 @@ export function createApprovalStore({ engine, broadcast, log, autoApprove, state
                     provider: job.provider || provider,
                     endpoint: job.endpoint || endpoint,
                     params: job.params || {},
+                    estimatedSpark: typeof job.estimatedSpark === "number" ? job.estimatedSpark : null,
                 }))
                 .filter((job) => job.provider && job.endpoint);
             if (!jobs.length) throw new Error("审批缺少 provider/endpoint");
@@ -117,6 +118,7 @@ export function createApprovalStore({ engine, broadcast, log, autoApprove, state
                 status: "pending",
                 run: null,
                 runs: [],
+                estimatedSpark: jobs.every((job) => typeof job.estimatedSpark === "number") ? Math.round(jobs.reduce((sum, job) => sum + job.estimatedSpark, 0) * 100) / 100 : null,
                 createdAt: new Date().toISOString(),
             };
             items.set(id, item);

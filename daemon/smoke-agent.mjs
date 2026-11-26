@@ -96,6 +96,9 @@ try {
     const conversationA = createdA.json?.conversation;
     check("创建对话 A", Boolean(conversationA?.id), JSON.stringify(createdA.json).slice(0, 160));
 
+    const preparedA = await post(`/api/projects/${PROJECT}/agent/conversations/${conversationA.id}/prepare`, {});
+    check("prepare 返回模型 configOptions", preparedA.status === 200 && Array.isArray(preparedA.json?.conversation?.configOptions), JSON.stringify(preparedA.json).slice(0, 200));
+
     const promptA = await post(`/api/projects/${PROJECT}/agent/conversations/${conversationA.id}/prompt`, { text: "只回复两个字：收到A" });
     check("对话 A 提交成功", promptA.status === 200, JSON.stringify(promptA.json).slice(0, 160));
     const replyA = await waitAssistant(PROJECT, conversationA.id);

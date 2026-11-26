@@ -20,7 +20,7 @@
 | ID | 问题 | 优先级 | 状态 | 验证方式/备注 |
 |---|---|---|---|---|
 | A1 | run completed 后 `applyDocOps` 回填画布失败只打日志，无重试/补偿，node 可能永远不更新 | P0 | 完成 | `doc_ops` SQLite 队列 + 5s 重试 + 启动恢复；smoke：先跑 ghost 节点失败，再补节点后自动 success |
-| A2 | 审批没有本地成本预估、`maxCostSpark`、批量上限；只依赖平台每日额度 | P1 | 部分完成 | 已显示 catalog 估算总 Spark；单次审批上限 50 个节点；`maxCostSpark` 仍未做 |
+| A2 | 审批没有本地成本预估、`maxCostSpark`、批量上限；只依赖平台每日额度 | P1 | 完成 | 服务端/UI 都显示 catalog 估算；单次 50 节点上限；`canvas_run_nodes` / `/api/approvals` 支持 `maxCostSpark`，超限 400；smoke 通过 |
 | A3 | catalog 首次未命中时多标签/多入口并发重复执行 `tools categories + list`；`tools:q` 缓存 key 无清理 | P1 | 完成 | 并发冷启动测试：categories 调用 1 次、第二个请求 cached=true；并清理超过 24h 的 `tools:q:v2:` 缓存 |
 | A4 | 资产上传无大小上限；失败 ops/run 留下孤儿资产 | P1 | 部分完成 | 已有 1GB 上传上限（原有 `MAX_BYTES`）并拒绝 AVIF/SVG；孤儿资产 GC 仍未做 |
 | A5 | 浏览器 E2E 只存在于 workspace 临时脚本，未纳入仓库回归 | P1 | 完成 | 新增 `daemon/e2e-browser.mjs`，已对真实项目跑通图片渲染；无异常 |
@@ -50,15 +50,15 @@
 | D19 | 思考/工具调用逐条平铺，不折叠、无耗时 | 完成 | transcript 时间戳 + 过程折叠 + 单条耗时；`smoke-agent` |
 | D20 | 视频节点没有「查看大图」 | 完成 | 浏览器 E2E：`<video>` 1280×720、readyState 4；工具栏/侧栏预览代码 |
 | D21 | 审批请求可能不弹窗 | 完成 | 审批 3s 轮询；浏览器 E2E 实际拉起弹窗 |
-| D22 | 浮动 Agent 窗口不能整体缩放，顶部拖动行占空间 | 完成（待浏览器交互复验） | 高度可拖拽、小把手；类型检查 |
+| D22 | 浮动 Agent 窗口不能整体缩放，顶部拖动行占空间 | 完成（代码，待交互复验） | 高度可拖拽、小把手；类型检查 |
 | D23 | `update_meta/viewport` 无文档、无回读 | 完成 | MCP 描述 + `get_state` 返回 viewport |
-| D24 | 新对话没有模型选择器 | 完成（待真实交互复验） | `prepareConversation` + 前端 prepare；ACP smoke |
+| D24 | 新对话没有模型选择器 | 完成 | `prepareConversation` + 前端 prepare；`smoke-agent` 已验证 prepare 返回 configOptions |
 
 ### 部分完成 / 待处理
 
 | ID | 问题 | 状态 | 剩余 |
 |---|---|---|---|
-| D6 | 端点故障不可见，没有降级建议 | 部分完成 | 已返回 `invocationEnabled` / `unavailableReason`；仍缺失败分类与降级建议 |
+| D6 | 端点故障不可见，没有降级建议 | 完成 | `invocationEnabled` / `unavailableReason` + 运行详情按额度/登录/超时/不可用/参数分类给出操作提示 |
 | D17 | ACP 会话恢复失败 `persistence.stat is not a function` | 不适用 | DSH/ACP 侧错误；画布已回退新建会话，丢上下文 |
 | S01 | 文件夹节点（组强化版） | 不适用 | 功能建议，不是缺陷 |
 
@@ -118,4 +118,4 @@
 - `node daemon/smoke-mcp.mjs`：通过
 - `node daemon/smoke-agent.mjs`：通过
 - 真实图片 / 视频 / 浏览器 E2E：通过
-- 待补：A2 的 maxCostSpark、A4 的孤儿 GC、D6 的失败分类/降级建议
+- 待补：A4 的孤儿 GC；D22 浏览器面板交互复验

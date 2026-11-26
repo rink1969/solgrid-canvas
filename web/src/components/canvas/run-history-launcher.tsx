@@ -3,6 +3,7 @@ import { Button, Drawer, Popconfirm, Tag, Tooltip } from "antd";
 import { History, RefreshCw, RotateCcw, Trash2, X } from "lucide-react";
 
 import { cancelRun, deleteRun, getRun, listRuns, retryRun, type SolgridRunSummary } from "@/services/api/solgrid";
+import { runErrorHint } from "@/lib/canvas/run-error-hint";
 
 const STATUS_LABEL: Record<string, { text: string; color: string }> = {
     queued: { text: "排队中", color: "default" },
@@ -149,6 +150,7 @@ export function RunHistoryLauncher({ projectId }: { projectId: string }) {
                             <div className="col-span-2 font-mono break-all">模型：{detail.provider} · {detail.endpoint}</div>
                             {detail.remoteRunId ? <div className="col-span-2 break-all">平台 runId：{detail.remoteRunId}</div> : null}
                             {detail.error ? <div className="col-span-2 text-red-500 whitespace-pre-wrap">错误：{detail.error}</div> : null}
+                            {detail.error && runErrorHint(detail.error) ? <div className="col-span-2 rounded-md bg-amber-50 px-2 py-1.5 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300">{runErrorHint(detail.error)}</div> : null}
                         </div>
                         {detail.outputs?.length ? (
                             <div>

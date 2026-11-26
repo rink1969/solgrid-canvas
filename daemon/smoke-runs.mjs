@@ -386,6 +386,22 @@ try {
     }).then((r) => r.json());
     check("批量审批产生两个 run", batchDecided.status === "approved" && batchDecided.runs?.length === 2, JSON.stringify(batchDecided).slice(0, 200));
 
+    // 审批成本上限：catalog 估算超过 maxCostSpark 时拒绝创建
+    await fetch(`${BASE}/api/tools/catalog`, { headers }).then((r) => r.json());
+    const overCost = await fetch(`${BASE}/api/approvals`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ projectId: "smokeproj", nodeId: "node1", provider: "fake", endpoint: "/v1/fake-image", params: { prompt: "太贵", count: "1" }, maxCostSpark: 1 }),
+    });
+    check("审批 maxCostSpark 超限被拒", overCost.status === 400, String(overCost.status));
+    const withinCost = await fetch(`${BASE}/api/approvals`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ projectId: "smokeproj", nodeId: "node1", provider: "fake", endpoint: "/v1/fake-image", params: { prompt: "可接受", count: "1" }, maxCostSpark: 10 }),
+    }).then((r) => r.json());
+    check("审批返回估算费用", withinCost.status === "pending" && withinCost.items?.[0]?.estimatedSpark === 3.9, JSON.stringify(withinCost).slice(0, 200));
+    await fetch(`${BASE}/api/approvals/${withinCost.id}/decision`, { method: "POST", headers, body: JSON.stringify({ allow: false }) });
+
     // 偏好开关：允许 Agent 自动生成后，审批直接产生 run
     const settingsBefore = await fetch(`${BASE}/api/settings`, { headers }).then((r) => r.json());
     check("默认需要人工审批", settingsBefore.settings?.agentAutoApprove === false, JSON.stringify(settingsBefore).slice(0, 120));

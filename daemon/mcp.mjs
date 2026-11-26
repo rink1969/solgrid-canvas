@@ -331,6 +331,7 @@ const TOOLS = [
                 provider: { type: "string" },
                 endpoint: { type: "string" },
                 params: { type: "object", description: "覆盖参数，如 prompt/size/count/seconds/resolution/videoMode/generateAudio" },
+                maxCostSpark: { type: "number", description: "本次审批的预估 Spark 上限；超过则拒绝创建审批" },
             },
             required: ["projectId"],
         },
@@ -501,7 +502,7 @@ const HANDLERS = {
         return api(`/api/tools/detail?provider=${encodeURIComponent(provider)}&endpoint=${encodeURIComponent(endpoint)}`);
     },
 
-    async canvas_run_nodes({ projectId, nodeId, nodeIds, provider, endpoint, params }) {
+    async canvas_run_nodes({ projectId, nodeId, nodeIds, provider, endpoint, params, maxCostSpark }) {
         const project = await getProject(projectId);
         const targets = (Array.isArray(nodeIds) && nodeIds.length ? nodeIds : [nodeId || project.nodes.find((node) => node.type === "image" || node.type === "video" || node.type === "audio")?.id]).filter(Boolean);
         if (!targets.length) throw new Error("找不到要生成的节点");
@@ -518,7 +519,7 @@ const HANDLERS = {
                 params: { ...collectParams(node, project), ...(params || {}) },
             };
         });
-        const approval = await api("/api/approvals", { method: "POST", body: JSON.stringify({ projectId, items }) });
+        const approval = await api("/api/approvals", { method: "POST", body: JSON.stringify({ projectId, items, ...(maxCostSpark ? { maxCostSpark } : {}) }) });
         return {
             approvalId: approval.id,
             status: approval.status,
