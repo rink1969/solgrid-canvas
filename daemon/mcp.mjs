@@ -83,6 +83,81 @@ const MIME_BY_EXT = {
     ".m4a": "audio/mp4",
 };
 
+const CANVAS_NODE_SCHEMA = {
+    type: "object",
+    required: ["id", "type"],
+    properties: {
+        id: { type: "string" },
+        type: { type: "string" },
+        title: { type: "string" },
+        position: {
+            type: "object",
+            required: ["x", "y"],
+            properties: { x: { type: "number" }, y: { type: "number" } },
+        },
+        x: { type: "number" },
+        y: { type: "number" },
+        width: { type: "number" },
+        height: { type: "number" },
+        metadata: { type: "object" },
+    },
+    additionalProperties: true,
+};
+
+const CANVAS_EDGE_SCHEMA = {
+    type: "object",
+    required: ["id", "fromNodeId", "toNodeId"],
+    properties: {
+        id: { type: "string" },
+        fromNodeId: { type: "string" },
+        toNodeId: { type: "string" },
+    },
+    additionalProperties: true,
+};
+
+const CANVAS_OPS_SCHEMA = {
+    type: "array",
+    maxItems: 500,
+    items: {
+        oneOf: [
+            { type: "object", required: ["type", "node"], properties: { type: { const: "add_node" }, node: CANVAS_NODE_SCHEMA } },
+            { type: "object", required: ["type", "id", "patch"], properties: { type: { const: "update_node" }, id: { type: "string" }, patch: { type: "object" } } },
+            { type: "object", required: ["type", "ids"], properties: { type: { const: "remove_nodes" }, ids: { type: "array", items: { type: "string" } } } },
+            { type: "object", required: ["type", "edge"], properties: { type: { const: "add_edge" }, edge: CANVAS_EDGE_SCHEMA } },
+            { type: "object", required: ["type", "ids"], properties: { type: { const: "remove_edges" }, ids: { type: "array", items: { type: "string" } } } },
+            { type: "object", required: ["type", "patch"], properties: { type: { const: "update_meta" }, patch: { type: "object" } } },
+            { type: "object", required: ["type", "ids", "dx", "dy"], properties: { type: { const: "move_nodes" }, ids: { type: "array", items: { type: "string" } }, dx: { type: "number" }, dy: { type: "number" } } },
+        ],
+    },
+};
+
+const ARTIFACT_ITEMS_SCHEMA = {
+    type: "array",
+    items: {
+        oneOf: [
+            {
+                type: "object",
+                required: ["kind", "text"],
+                properties: { kind: { const: "text" }, text: { type: "string" }, title: { type: "string" } },
+                additionalProperties: true,
+            },
+            {
+                type: "object",
+                required: ["kind"],
+                properties: {
+                    kind: { enum: ["image", "video", "audio"] },
+                    path: { type: "string" },
+                    storageKey: { type: "string" },
+                    title: { type: "string" },
+                    width: { type: "number" },
+                    height: { type: "number" },
+                },
+                additionalProperties: true,
+            },
+        ],
+    },
+};
+
 const PROJECTS_DIR = path.join(ROOT, "projects");
 const INBOX_DIR = path.join(ROOT, "inbox");
 const SENSITIVE_DIRS = [".ssh", ".aws", ".gnupg", ".config", ".dsh", ".codex", ".claude"];
@@ -182,7 +257,7 @@ const TOOLS = [
             type: "object",
             properties: {
                 projectId: { type: "string" },
-                ops: { type: "array", items: { type: "object" } },
+                ops: CANVAS_OPS_SCHEMA,
                 expectRev: { type: "number" },
             },
             required: ["projectId", "ops"],
@@ -220,7 +295,7 @@ const TOOLS = [
             properties: {
                 projectId: { type: "string" },
                 anchorNodeId: { type: "string" },
-                items: { type: "array", items: { type: "object" } },
+                items: ARTIFACT_ITEMS_SCHEMA,
                 connect: { type: "boolean", default: true },
                 groupTitle: { type: "string" },
                 layout: { type: "string", enum: ["auto", "row", "column", "grid"], default: "auto" },

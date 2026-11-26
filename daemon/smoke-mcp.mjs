@@ -131,6 +131,8 @@ try {
     const names = (tools.result?.tools || []).map((tool) => tool.name);
     check("工具数 >= 10", names.length >= 10, String(names.length));
     check("包含关键工具", ["canvas_get_state", "canvas_apply_ops", "canvas_place_artifacts", "canvas_run_nodes", "canvas_watch_run"].every((name) => names.includes(name)));
+    const opsTool = (tools.result?.tools || []).find((tool) => tool.name === "canvas_apply_ops");
+    check("apply_ops schema 是 oneOf", Array.isArray(opsTool?.inputSchema?.properties?.ops?.items?.oneOf) && opsTool.inputSchema.properties.ops.items.oneOf.length === 7);
 
     const projects = await call("canvas_list_projects", {});
     check("list_projects 能看到项目", projects.data.some((item) => item.id === "mcpproj"));

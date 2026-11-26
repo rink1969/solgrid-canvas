@@ -37,6 +37,13 @@ export function openDb(root) {
             key TEXT PRIMARY KEY,
             value_json TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS doc_ops (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            ops_json TEXT NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        );
     `);
     ensureColumn(db, "runs", "built_body_json", "TEXT");
     return db;
@@ -171,6 +178,9 @@ export function createCatalogCache(db) {
         put(key, value) {
             putStmt.run(key, JSON.stringify(value), Date.now());
         },
+        prune(prefix, ttlMs) {
+            db.prepare("DELETE FROM catalog WHERE key LIKE ? AND fetched_at < ?").run(`${prefix}%`, Date.now() - ttlMs);
+        },
     };
 }
 
@@ -190,6 +200,31 @@ export function createSettingsStore(db) {
         set(key, value) {
             putStmt.run(key, JSON.stringify(value));
             return value;
+        },
+    };
+}
+
+export function createDocOpStore(db) {
+    const putStmt = db.prepare(`
+        INSERT INTO doc_ops (id, project_id, ops_json, attempts, created_at)
+        VALUES (?, ?, ?, 0, ?)
+        ON CONFLICT(id) DO UPDATE SET project_id = excluded.project_id, ops_json = excluded.ops_json, attempts = 0
+    `);
+    const listStmt = db.prepare("SELECT * FROM doc_ops ORDER BY created_at");
+    const removeStmt = db.prepare("DELETE FROM doc_ops WHERE id = ?");
+    const bumpStmt = db.prepare("UPDATE doc_ops SET attempts = attempts + 1 WHERE id = ?");
+    return {
+        put(id, projectId, ops) {
+            putStmt.run(id, projectId, JSON.stringify(ops), new Date().toISOString());
+        },
+        list() {
+            return listStmt.all().map((row) => ({ id: row.id, projectId: row.project_id, ops: JSON.parse(row.ops_json), attempts: row.attempts }));
+        },
+        remove(id) {
+            removeStmt.run(id);
+        },
+        bump(id) {
+            bumpStmt.run(id);
         },
     };
 }

@@ -85,22 +85,52 @@ function sanitizeParams(value) {
     return value;
 }
 
-export function createRunEngine({ store, gateway, projectsDir, bodyDir, broadcast, log, docStore, opLog }) {
+export function createRunEngine({ store, gateway, projectsDir, bodyDir, broadcast, log, docStore, opLog, docOps }) {
     let busy = false;
+    let docRetryTimer = null;
 
     function emit(run) {
         broadcast?.({ type: "run.updated", run });
     }
 
     // 把结果写回画布文档（daemon 是唯一写入方）：刷新页面后节点也能显示结果
+    function scheduleDocRetry() {
+        if (docRetryTimer || !docOps) return;
+        docRetryTimer = setTimeout(() => {
+            docRetryTimer = null;
+            retryDocOps();
+        }, 5000);
+        docRetryTimer.unref?.();
+    }
+
+    function retryDocOps() {
+        if (!docStore || !docOps) return;
+        for (const item of docOps.list()) {
+            try {
+                const result = applyOps(docStore, item.projectId, item.ops);
+                opLog?.append(item.projectId, item.ops, "daemon");
+                broadcast?.({ type: "project.ops", id: item.projectId, rev: result.rev, ops: item.ops.length, clientId: "daemon" });
+                docOps.remove(item.id);
+                log(`run ${item.id} 回填画布补偿成功`);
+            } catch (error) {
+                docOps.bump(item.id);
+                log(`run ${item.id} 回填画布补偿失败（第 ${item.attempts + 1} 次）：${error.message}`);
+            }
+        }
+        if (docOps.list().length) scheduleDocRetry();
+    }
+
     function applyDocOps(run, ops) {
         if (!docStore || !ops.length) return;
         try {
             const result = applyOps(docStore, run.projectId, ops);
             opLog?.append(run.projectId, ops, "daemon");
             broadcast?.({ type: "project.ops", id: run.projectId, rev: result.rev, ops: ops.length, clientId: "daemon" });
+            docOps?.remove(run.id);
         } catch (error) {
             log(`run ${run.id} 回填画布失败：${error.message}`);
+            docOps?.put(run.id, run.projectId, ops);
+            scheduleDocRetry();
         }
     }
 
@@ -448,6 +478,7 @@ export function createRunEngine({ store, gateway, projectsDir, bodyDir, broadcas
         },
         // 启动恢复：有 remoteRunId 的续轮询；只有幂等键的按 key 找回；都没有的重回队列
         async recover() {
+            retryDocOps();
             const unfinished = store.unfinished();
             for (const run of unfinished) {
                 if (run.remoteRunId) {

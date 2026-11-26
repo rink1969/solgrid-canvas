@@ -14,6 +14,9 @@ const TINY_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVR4nGNgAA
 
 const argv = process.argv.slice(2);
 const command = argv[0];
+if (command === "tools") {
+    fs.appendFileSync(path.join(stateDir, "tools-calls.log"), `${argv.slice(0, 2).join(" ")}\n`);
+}
 const flag = (name) => {
     const index = argv.indexOf(name);
     return index === -1 ? undefined : argv[index + 1];

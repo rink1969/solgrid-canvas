@@ -8,7 +8,7 @@ import path from "node:path";
 
 import { createStore } from "./store.mjs";
 import { receiveAsset, serveAsset } from "./assets.mjs";
-import { createCatalogCache, createOpLog, createRunStore, createSettingsStore, openDb } from "./db.mjs";
+import { createCatalogCache, createDocOpStore, createOpLog, createRunStore, createSettingsStore, openDb } from "./db.mjs";
 import { applyOps, normalizeOps, validateProjectPayload } from "./ops.mjs";
 import { createApprovalStore } from "./approvals.mjs";
 import { createAgentManager } from "./acp.mjs";
@@ -66,6 +66,8 @@ function resolveToken() {
 const TOKEN = resolveToken();
 const store = createStore(ROOT);
 const clients = new Set(); // SSE 连接
+let catalogBuilding = false;
+const catalogWaiters = [];
 
 function log(...args) {
     // 日志脱敏：不打印 token / dataURL
@@ -184,6 +186,7 @@ const db = openDb(ROOT);
 const runStore = createRunStore(db);
 const catalog = createCatalogCache(db);
 const settings = createSettingsStore(db);
+const docOps = createDocOpStore(db);
 const opLog = createOpLog(db);
 const gateway = createGateway();
 const bodyDir = path.join(ROOT, "tmp");
@@ -197,6 +200,7 @@ const engine = createRunEngine({
     log,
     docStore: store,
     opLog,
+    docOps,
 });
 void engine.recover();
 const approvals = createApprovalStore({ engine, broadcast, log, autoApprove: () => Boolean(settings.get("agentAutoApprove", false)), stateFile: path.join(ROOT, "approvals.json") });
@@ -300,6 +304,7 @@ async function handle(req, res) {
                     unavailableReason: item.unavailableReason,
                 }));
             catalog.put(key, results);
+            catalog.prune("tools:q:v2:", TOOLS_QUERY_TTL_MS);
             return sendJson(res, 200, { results, cached: false });
         } catch (error) {
             const stale = catalog.get(key);
@@ -315,7 +320,13 @@ async function handle(req, res) {
         if (!force) {
             const cached = catalog.get(key, CATALOG_TTL_MS);
             if (cached) return sendJson(res, 200, { catalog: cached, cached: true });
+            if (catalogBuilding) {
+                await new Promise((resolve) => catalogWaiters.push(resolve));
+                const shared = catalog.get(key, CATALOG_TTL_MS);
+                if (shared) return sendJson(res, 200, { catalog: shared, cached: true });
+            }
         }
+        catalogBuilding = true;
         try {
             const categoryBuckets = { image: "image", video: "video", music: "audio", "sound-effect": "audio", speech: "audio", "audio-editing": "audio" };
             const categories = await gateway.toolCategories();
@@ -355,6 +366,9 @@ async function handle(req, res) {
             const stale = catalog.get(key);
             if (stale) return sendJson(res, 200, { catalog: stale, cached: true, warning: error.message });
             return sendJson(res, 502, { error: "solgrid_unavailable", message: error.message });
+        } finally {
+            catalogBuilding = false;
+            for (const resolve of catalogWaiters.splice(0)) resolve();
         }
     }
 
@@ -560,7 +574,12 @@ async function handle(req, res) {
             }
             items.push({ nodeId: jobNodeId, provider: jobProvider, endpoint: jobEndpoint, params });
         }
-        const approval = approvals.create({ projectId, items });
+        let approval;
+        try {
+            approval = approvals.create({ projectId, items });
+        } catch (error) {
+            return sendJson(res, 400, { error: "invalid_approval", message: error.message });
+        }
         return sendJson(res, 200, { id: approval.id, status: approval.status, items: approval.items, run: approval.run || null, runs: approval.runs || [], runIds: (approval.runs || []).map((run) => run.id) });
     }
 

@@ -416,6 +416,27 @@ try {
     check("Agent token 不能绕过审批", blocked.status === 403, String(blocked.status));
 
     // 列表与取消
+    // 回填补偿：先让 run 完成后节点不存在，再补节点，5s 内应自动 reconcile
+    const ghostRun = await fetch(`${BASE}/api/runs`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ projectId: "smokeproj", nodeId: "ghost", provider: "alibaba", endpoint: "/v1/image/qwen-image-3.0", params: { prompt: "reconcile" } }),
+    }).then((r) => r.json());
+    for (let i = 0; i < 80; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const state = await fetch(`${BASE}/api/runs/${ghostRun.run.id}`, { headers }).then((r) => r.json());
+        if (state.run?.status === "completed") break;
+    }
+    await fetch(`${BASE}/api/projects/smokeproj/ops`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ ops: [{ type: "add_node", node: { id: "ghost", type: "image", title: "补偿节点", position: { x: 0, y: 800 }, width: 320, height: 320, metadata: { status: "idle" } } }] }),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 7000));
+    const reconciled = await fetch(`${BASE}/api/projects/smokeproj`, { headers }).then((r) => r.json());
+    const ghostNode = reconciled.project.nodes.find((node) => node.id === "ghost");
+    check("run 回填失败后自动 reconcile", ghostNode?.metadata?.status === "success", JSON.stringify(ghostNode?.metadata).slice(0, 160));
+
     const list = await fetch(`${BASE}/api/runs?projectId=smokeproj`, { headers }).then((r) => r.json());
     check("run 列表", (list.runs?.length || 0) >= 2 && list.runs.some((item) => item.id === run.id));
 

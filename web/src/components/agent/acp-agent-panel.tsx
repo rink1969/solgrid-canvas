@@ -139,7 +139,7 @@ export function AcpAgentPanel({ floating = false, onToggleFloating }: { floating
     }, [activeId]);
 
     useEffect(() => {
-        setAgentState({ messages, enabled: true, connected: available !== false, models, model: current, panelMounted: true });
+        setAgentState({ messages, enabled: available !== false, connected: available === true, models, model: current, panelMounted: true });
     }, [messages, models, current, available, setAgentState]);
 
     const loadTranscript = useCallback(
@@ -205,6 +205,22 @@ export function AcpAgentPanel({ floating = false, onToggleFloating }: { floating
             setError(cause instanceof Error ? cause.message : String(cause));
         }
     }, [projectId, refreshConversations, loadTranscript, storageKey]);
+
+    useEffect(() => {
+        let alive = true;
+        getAgentStatus()
+            .then((status) => {
+                if (!alive) return;
+                setAvailable(status.available);
+                setAdapter(status.adapter);
+            })
+            .catch(() => {
+                if (alive) setAvailable(false);
+            });
+        return () => {
+            alive = false;
+        };
+    }, []);
 
     useEffect(() => {
         if (!panelOpen) return;
@@ -573,7 +589,7 @@ export function AcpAgentPanel({ floating = false, onToggleFloating }: { floating
                 <Bot className="size-4 opacity-70" />
                 <span className="text-sm font-medium">本地 Agent</span>
                 <Tag className="!m-0" color={available ? "green" : "default"}>
-                    {adapter || "未连接"}
+                    {available === null ? "检测中" : available ? adapter || "已连接" : "未连接"}
                 </Tag>
                 <div className="ml-auto flex items-center gap-1">
                     <Segmented

@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Button, Modal, Tag } from "antd";
 
 import { decideApproval, listPendingApprovals, type CanvasApproval } from "@/services/api/approvals";
+import { listCatalog, type SolgridCatalog } from "@/services/api/solgrid";
+import { estimateSpark, findToolPrice } from "@/lib/canvas/solgrid-cost";
 
 const MODE_LABEL: Record<string, string> = { image: "图片", video: "视频", audio: "音频", text: "文本" };
 
@@ -19,6 +21,11 @@ function summarize(approval: CanvasApproval) {
 export function ApprovalCenter({ projectId }: { projectId: string }) {
     const [approvals, setApprovals] = useState<CanvasApproval[]>([]);
     const [deciding, setDeciding] = useState<string | null>(null);
+    const [catalog, setCatalog] = useState<SolgridCatalog | null>(null);
+
+    useEffect(() => {
+        listCatalog().then(setCatalog).catch(() => undefined);
+    }, []);
 
     useEffect(() => {
         let alive = true;
@@ -64,6 +71,18 @@ export function ApprovalCenter({ projectId }: { projectId: string }) {
     if (!current) return null;
     const { prompt, count, seconds, resolution, nodes } = summarize(current);
     const kind = current.endpoint.includes("/video/") ? "video" : current.endpoint.includes("/audio/") || current.endpoint.includes("t2a") ? "audio" : "image";
+    const billingItems = Array.isArray(current.items) && current.items.length ? current.items : [{ provider: current.provider, endpoint: current.endpoint, params: current.params }];
+    const estimates = billingItems.map((item) => {
+        const price = findToolPrice(catalog, item.provider, item.endpoint);
+        const params = item.params || {};
+        return estimateSpark(price, {
+            outputs: Number(params.count) || 1,
+            seconds: Number(params.seconds) || 0,
+            resolution: typeof params.resolution === "string" ? params.resolution : "",
+            references: Array.isArray(params.references) ? params.references.length : 0,
+        });
+    });
+    const estimatedTotal = estimates.every((value) => typeof value === "number") ? estimates.reduce((sum, value) => sum + value, 0) : null;
 
     return (
         <Modal open title={`Agent 请求生成（待审批 ${approvals.length} 个）`} onCancel={() => void decide(current, false)} footer={null} width={520} maskClosable={false}>
@@ -83,6 +102,7 @@ export function ApprovalCenter({ projectId }: { projectId: string }) {
                         {resolution ? ` · ${resolution}` : ""}
                     </div>
                     {prompt ? <div className="mt-1 line-clamp-3 opacity-80">{prompt}</div> : null}
+                    {estimatedTotal !== null ? <div className="mt-1 font-medium text-emerald-600 dark:text-emerald-400">预计费用：约 {estimatedTotal} Spark（实际以平台结算为准）</div> : null}
                 </div>
                 <div className="text-xs text-stone-500">批准后立即入队；拒绝不会产生任何费用。</div>
                 <div className="flex justify-end gap-2">

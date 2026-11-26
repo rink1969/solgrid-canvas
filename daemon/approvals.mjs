@@ -103,6 +103,7 @@ export function createApprovalStore({ engine, broadcast, log, autoApprove, state
                 }))
                 .filter((job) => job.provider && job.endpoint);
             if (!jobs.length) throw new Error("审批缺少 provider/endpoint");
+            if (jobs.length > 50) throw new Error("单次审批最多 50 个节点，请分批提交");
             const id = crypto.randomUUID();
             const first = jobs[0];
             const item = {
