@@ -217,6 +217,7 @@ export function createAgentManager({ broadcast, log }) {
     const bySession = new Map(); // sessionId -> runtime
     const projects = new Map(); // projectId -> { cwd, conversations: [] }
     const permissions = new Map(); // id -> { requestId, projectId, conversationId }
+    const sessionPromises = new Map();
     const transcriptTimers = new Map();
 
     return manager();
@@ -310,6 +311,20 @@ export function createAgentManager({ broadcast, log }) {
                 return Array.isArray(saved?.messages) ? saved.messages : [];
             },
             async ensureSession(projectId, cwd, conversationId) {
+                const key = runtimeKey(projectId, conversationId);
+                const existing = runtimes.get(key);
+                if (existing) return existing;
+                const pending = sessionPromises.get(key);
+                if (pending) return pending;
+                const promise = this.ensureSessionUnlocked(projectId, cwd, conversationId);
+                sessionPromises.set(key, promise);
+                try {
+                    return await promise;
+                } finally {
+                    if (sessionPromises.get(key) === promise) sessionPromises.delete(key);
+                }
+            },
+            async ensureSessionUnlocked(projectId, cwd, conversationId) {
                 const conversation = findConversation(projectId, cwd, conversationId);
                 const key = runtimeKey(projectId, conversationId);
                 const existing = runtimes.get(key);
@@ -394,7 +409,7 @@ export function createAgentManager({ broadcast, log }) {
                         if (tail && tail.role === "thought" && !tail.endedAt) tail.endedAt = endedAt;
                         conversation.updatedAt = new Date().toISOString();
                         saveConversations(projectId);
-                        persistTranscript(projectId, conversationId, cwd, runtime.transcript);
+                        persistTranscript(projectId, conversationId, cwd, runtime.transcript, { immediate: true });
                         emit(projectId, conversationId, { kind: "done", stopReason: result?.stopReason });
                     })
                     .catch((error) => {
@@ -402,7 +417,7 @@ export function createAgentManager({ broadcast, log }) {
                         const endedAt = new Date().toISOString();
                         const tail = runtime.transcript[runtime.transcript.length - 1];
                         if (tail && tail.role === "thought" && !tail.endedAt) tail.endedAt = endedAt;
-                        persistTranscript(projectId, conversationId, cwd, runtime.transcript);
+                        persistTranscript(projectId, conversationId, cwd, runtime.transcript, { immediate: true });
                         if (/not found|unknown session|invalid session/i.test(error.message)) {
                             runtimes.delete(runtimeKey(projectId, conversationId));
                             bySession.delete(runtime.sessionId);
@@ -487,7 +502,7 @@ export function createAgentManager({ broadcast, log }) {
         }
     }
 
-    function persistTranscript(projectId, conversationId, cwd, transcript) {
+    function persistTranscript(projectId, conversationId, cwd, transcript, options = {}) {
         const key = runtimeKey(projectId, conversationId);
         const timer = transcriptTimers.get(key);
         if (timer) clearTimeout(timer);
@@ -499,6 +514,15 @@ export function createAgentManager({ broadcast, log }) {
                 log(`[acp] transcript 写入失败：${error.message}`);
             }
         };
+        if (options.immediate) {
+            const pending = transcriptTimers.get(key);
+            if (pending) {
+                clearTimeout(pending);
+                transcriptTimers.delete(key);
+            }
+            write();
+            return;
+        }
         // 流式更新很频繁，合并成 400ms 一次写盘；done 时再强制落一次
         const next = setTimeout(write, 400);
         next.unref?.();

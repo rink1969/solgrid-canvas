@@ -89,6 +89,13 @@ try {
     // ---- 增量 op ----
     const before = await api("GET", "/api/projects/smoke1");
     const beforeRev = before.json.project.rev;
+    const badGeometryPut = await api("PUT", "/api/projects/smoke1", {
+        expectRev: beforeRev,
+        project: { ...before.json.project, nodes: [{ ...before.json.project.nodes[0], position: { x: "bad", y: 0 } }] },
+    });
+    check("全量保存也拒绝坏几何", badGeometryPut.status === 400, JSON.stringify(badGeometryPut.json).slice(0, 160));
+    const overwriteWithoutRev = await api("PUT", "/api/projects/smoke1", { project: before.json.project });
+    check("已有画布全量保存需要 expectRev", overwriteWithoutRev.status === 409, JSON.stringify(overwriteWithoutRev.json).slice(0, 160));
     const opsResult = await api("POST", "/api/projects/smoke1/ops", {
         ops: [
             { type: "add_node", node: { id: "n4", type: "text", title: "新节点", position: { x: 10, y: 600 }, width: 200, height: 100, metadata: { content: "op 新增" } } },

@@ -60,6 +60,32 @@ function normalizeAddedNode(node) {
     return normalizeGeometry({ ...node, type });
 }
 
+export function validateProjectPayload(project) {
+    ensure(project && typeof project === "object", "project 必须是对象");
+    ensure(Array.isArray(project.nodes), "project.nodes 必须是数组");
+    const ids = new Set();
+    const nodes = project.nodes.map((node, index) => {
+        const normalized = normalizeGeometry(node, undefined);
+        ensure(typeof normalized.id === "string" && normalized.id.length > 0, `nodes[${index}].id 必须是非空字符串`);
+        ensure(!ids.has(normalized.id), `节点 id 重复：${normalized.id}`);
+        ids.add(normalized.id);
+        ensure(typeof normalized.type === "string" && normalized.type.length > 0, `nodes[${index}].type 必须是非空字符串`);
+        return normalized;
+    });
+    const edgeIds = new Set();
+    const connections = (Array.isArray(project.connections) ? project.connections : []).map((edge, index) => {
+        ensure(edge && typeof edge === "object", `connections[${index}] 必须是对象`);
+        ensure(typeof edge.id === "string" && edge.id.length > 0, `connections[${index}].id 必须是非空字符串`);
+        ensure(!edgeIds.has(edge.id), `连线 id 重复：${edge.id}`);
+        edgeIds.add(edge.id);
+        ensure(ids.has(edge.fromNodeId), `连线 ${edge.id} 的 fromNodeId 不存在：${edge.fromNodeId}`);
+        ensure(ids.has(edge.toNodeId), `连线 ${edge.id} 的 toNodeId 不存在：${edge.toNodeId}`);
+        ensure(edge.fromNodeId !== edge.toNodeId, `连线 ${edge.id} 不能连接到自身`);
+        return edge;
+    });
+    return { ...project, nodes, connections };
+}
+
 export function normalizeOps(ops) {
     ensure(Array.isArray(ops) && ops.length > 0, "ops 不能为空");
     ensure(ops.length <= 500, "单次最多 500 个 op");
@@ -79,12 +105,14 @@ export function applyOps(store, projectId, ops) {
         switch (op.type) {
             case "add_node": {
                 ensure(op.node?.id, "add_node 需要 node.id");
+                ensure(!nodes.has(op.node.id), `add_node 节点 id 已存在：${op.node.id}`);
                 nodes.set(op.node.id, normalizeAddedNode(op.node));
                 break;
             }
             case "update_node": {
                 ensure(op.id && nodes.has(op.id), `update_node 节点不存在：${op.id}`);
                 const current = nodes.get(op.id);
+                ensure(op.patch?.id === undefined || op.patch.id === op.id, "update_node 不允许修改节点 id");
                 const patch = normalizeGeometry(op.patch || {}, current);
                 nodes.set(op.id, { ...current, ...patch, metadata: { ...current.metadata, ...(patch.metadata || {}) } });
                 break;
@@ -96,6 +124,9 @@ export function applyOps(store, projectId, ops) {
             }
             case "add_edge": {
                 ensure(op.edge?.id && op.edge?.fromNodeId && op.edge?.toNodeId, 'add_edge 需要 edge.id / fromNodeId / toNodeId');
+                ensure(nodes.has(op.edge.fromNodeId), `add_edge 的 fromNodeId 不存在：${op.edge.fromNodeId}`);
+                ensure(nodes.has(op.edge.toNodeId), `add_edge 的 toNodeId 不存在：${op.edge.toNodeId}`);
+                ensure(op.edge.fromNodeId !== op.edge.toNodeId, "add_edge 不能连接到自身");
                 connections = [...connections.filter((edge) => edge.id !== op.edge.id), op.edge];
                 break;
             }

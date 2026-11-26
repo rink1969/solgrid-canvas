@@ -88,6 +88,21 @@ export function setAgentModel(projectId: string, conversationId: string, configI
     return request<{ configOptions: AgentConfigOption[] }>(`/projects/${projectId}/agent/conversations/${conversationId}/model`, { method: "POST", body: JSON.stringify({ configId, value }) });
 }
 
+export type AgentPermission = {
+    id: string;
+    projectId: string;
+    conversationId: string;
+    title: string;
+    toolCall?: { title?: string } & Record<string, unknown>;
+    options?: unknown[];
+};
+
+export function listAgentPermissions(projectId: string, conversationId?: string) {
+    const query = new URLSearchParams({ projectId });
+    if (conversationId) query.set("conversationId", conversationId);
+    return request<{ permissions: AgentPermission[] }>(`/agent/permissions?${query.toString()}`).then((data) => data.permissions);
+}
+
 export function decideAgentPermission(id: string, allow: boolean) {
     return request<{ ok: boolean }>(`/agent/permissions/${id}`, { method: "POST", body: JSON.stringify({ allow }) });
 }

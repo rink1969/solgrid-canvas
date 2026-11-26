@@ -13,6 +13,7 @@ import type { AppLocale } from "@/i18n";
 import { exportAppConfig, importAppConfig } from "@/services/config-file";
 import { syncAppDataToWebdav, type AppSyncDomainKey, type AppSyncProgressEvent } from "@/services/app-sync";
 import { testWebdavConnection, WEBDAV_MANIFEST_FILE_NAME } from "@/services/webdav-sync";
+import { getDaemonSettings, updateDaemonSettings } from "@/services/api/settings";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
 import { computeMediaSize, inferMediaRatio, inferMediaScale, mediaScaleOptions, parseVideoResolution } from "@/lib/media-size";
 import { createModelChannel, modelOptionsFromChannels, normalizeModelOptionValue, selectableModelsByCapability, useConfigStore, type AiConfig, type ApiCallFormat, type ConfigTabKey, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
@@ -58,6 +59,8 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
     const [syncingWebdav, setSyncingWebdav] = useState(false);
     const [webdavSyncStatus, setWebdavSyncStatus] = useState("");
     const [webdavDomainProgress, setWebdavDomainProgress] = useState(createWebdavDomainProgress);
+    const [agentAutoApprove, setAgentAutoApprove] = useState(false);
+    const [settingsLoading, setSettingsLoading] = useState(false);
     const config = useConfigStore((state) => state.config);
     const webdav = useConfigStore((state) => state.webdav);
     const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -70,6 +73,27 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
     const locale = i18n.resolvedLanguage as AppLocale;
     const imageResolutionOptions = mediaScaleOptions.map((value) => ({ value, label: value === "auto" ? t("settingsPanels.common.auto") : value.toUpperCase() }));
     useEffect(() => setActiveTab(initialTab), [initialTab]);
+    useEffect(() => {
+        getDaemonSettings()
+            .then((next) => setAgentAutoApprove(Boolean(next.agentAutoApprove)))
+            .catch(() => undefined);
+    }, []);
+
+    const toggleAgentAutoApprove = async (checked: boolean) => {
+        const previous = agentAutoApprove;
+        setAgentAutoApprove(checked);
+        setSettingsLoading(true);
+        try {
+            const next = await updateDaemonSettings({ agentAutoApprove: checked });
+            setAgentAutoApprove(Boolean(next.agentAutoApprove));
+            message.success(checked ? t("config.preferences.agentAutoApproveOn") : t("config.preferences.agentAutoApproveOff"));
+        } catch (error) {
+            setAgentAutoApprove(previous);
+            message.error(error instanceof Error ? error.message : t("config.preferences.agentAutoApproveFailed"));
+        } finally {
+            setSettingsLoading(false);
+        }
+    };
 
     const saveConfig = (nextConfig: AiConfig) => {
         (Object.keys(nextConfig) as Array<keyof AiConfig>).forEach((key) => updateConfig(key, nextConfig[key]));
@@ -246,6 +270,12 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
                                     <div className="flex items-center justify-between gap-3">
                                         <span className="text-sm">{t("config.preferences.autoFocusOnSelect")}</span>
                                         <Switch checked={config.autoFocusOnSelect} onChange={(checked) => updateConfig("autoFocusOnSelect", checked)} />
+                                    </div>
+                                </Form.Item>
+                                <Form.Item className="mb-4" extra={t("config.preferences.agentAutoApproveDescription")}>
+                                    <div className="flex items-center justify-between gap-3">
+                                        <span className="text-sm">{t("config.preferences.agentAutoApprove")}</span>
+                                        <Switch checked={agentAutoApprove} loading={settingsLoading} onChange={(checked) => void toggleAgentAutoApprove(checked)} />
                                     </div>
                                 </Form.Item>
                                 <Form.Item label={t("config.preferences.audioInstructions")} className="mb-4">

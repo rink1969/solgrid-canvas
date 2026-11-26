@@ -15,6 +15,7 @@ const snapshot = new Map<string, CanvasProject>(); // id -> 上次同步后的�
 const revs = new Map<string, number>();
 let applyingRemote = false;
 let timer: ReturnType<typeof setTimeout> | null = null;
+let flushPromise: Promise<void> | null = null;
 let closeEvents: (() => void) | null = null;
 let started = false;
 
@@ -222,6 +223,16 @@ function scheduleFlush() {
 }
 
 async function flush() {
+    if (flushPromise) return flushPromise;
+    flushPromise = runFlush();
+    try {
+        await flushPromise;
+    } finally {
+        flushPromise = null;
+    }
+}
+
+async function runFlush() {
     timer = null;
     const projects = useCanvasStore.getState().projects;
     const currentIds = new Set(projects.map((project) => project.id));

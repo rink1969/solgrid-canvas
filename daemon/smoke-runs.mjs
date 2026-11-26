@@ -384,6 +384,27 @@ try {
     }).then((r) => r.json());
     check("批量审批产生两个 run", batchDecided.status === "approved" && batchDecided.runs?.length === 2, JSON.stringify(batchDecided).slice(0, 200));
 
+    // 偏好开关：允许 Agent 自动生成后，审批直接产生 run
+    const settingsBefore = await fetch(`${BASE}/api/settings`, { headers }).then((r) => r.json());
+    check("默认需要人工审批", settingsBefore.settings?.agentAutoApprove === false, JSON.stringify(settingsBefore).slice(0, 120));
+    const settingsOn = await fetch(`${BASE}/api/settings`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ agentAutoApprove: true }),
+    }).then((r) => r.json());
+    check("可开启 Agent 自动生成", settingsOn.settings?.agentAutoApprove === true, JSON.stringify(settingsOn).slice(0, 120));
+    const autoApproval = await fetch(`${BASE}/api/approvals`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ projectId: "smokeproj", items: [{ nodeId: "node1", provider: "alibaba", endpoint: "/v1/image/qwen-image-3.0", params: { prompt: "自动审批测试" } }] }),
+    }).then((r) => r.json());
+    check("自动生成设置生效", autoApproval.status === "approved" && autoApproval.runs?.length === 1, JSON.stringify(autoApproval).slice(0, 200));
+    await fetch(`${BASE}/api/settings`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ agentAutoApprove: false }),
+    });
+
     // 只有 token、没有浏览器确认头的请求不能绕过审批直接入队
     const blocked = await fetch(`${BASE}/api/runs`, {
         method: "POST",

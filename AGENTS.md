@@ -29,7 +29,7 @@
 6. **模型 = `{provider, endpoint, params}`**：禁止把 solgrid 伪装成"OpenAI 兼容渠道"（不要造 baseUrl/apiKey、不要按模型写脚本），禁止硬编码模型清单。**允许在设置页以「内置渠道」形式呈现 solgrid**：只读卡片 + 模型列表来自 daemon 的 catalog 缓存，用于选择默认模型；参数表单由 `inspect` 的 JSON Schema 驱动，未知端点走 raw JSON 兜底。
 7. **Agent 集成：ACP 进、MCP 出**：画布作为 ACP client 驱动本地 Agent，同时作为 MCP server 供 Agent 操作画布。**不读** `~/.codex`、`~/.claude`、`~/.dsh` 里的配置或凭证来"猜"模型。例外：用户显式执行 `solgrid-canvas sync-config` 时，可以按 id 同步 DSH profile 的 provider 定义与默认模型（**不含任何凭证**）到 ACP profile。
 8. **图与时间线分离**：时间线是独立文档（`timeline.json`），不是节点图的子集。
-9. **付费必须可见可确认**：Agent 通道的花费确认挂在 ACP `request_permission`；UI 通道必须有明确确认动作。禁止静默花钱。
+9. **付费必须可见可确认**：默认情况下 Agent 通道的生成请求必须由用户在画布审批；UI 通道必须有明确确认动作。允许用户显式开启「Agent 自动发起生成」偏好，开启后 MCP 生成自动通过审批，费用上限由 solgrid 平台控制。
 
 ---
 

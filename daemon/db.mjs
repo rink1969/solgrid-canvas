@@ -33,6 +33,10 @@ export function openDb(root) {
             json TEXT NOT NULL,
             fetched_at INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value_json TEXT NOT NULL
+        );
     `);
     ensureColumn(db, "runs", "built_body_json", "TEXT");
     return db;
@@ -166,6 +170,26 @@ export function createCatalogCache(db) {
         },
         put(key, value) {
             putStmt.run(key, JSON.stringify(value), Date.now());
+        },
+    };
+}
+
+export function createSettingsStore(db) {
+    const getStmt = db.prepare("SELECT value_json FROM settings WHERE key = ?");
+    const putStmt = db.prepare("INSERT INTO settings (key, value_json) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json");
+    return {
+        get(key, fallback = null) {
+            const row = getStmt.get(key);
+            if (!row) return fallback;
+            try {
+                return JSON.parse(row.value_json);
+            } catch {
+                return fallback;
+            }
+        },
+        set(key, value) {
+            putStmt.run(key, JSON.stringify(value));
+            return value;
         },
     };
 }

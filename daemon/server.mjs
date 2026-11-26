@@ -8,8 +8,8 @@ import path from "node:path";
 
 import { createStore } from "./store.mjs";
 import { receiveAsset, serveAsset } from "./assets.mjs";
-import { createCatalogCache, createOpLog, createRunStore, openDb } from "./db.mjs";
-import { applyOps, normalizeOps } from "./ops.mjs";
+import { createCatalogCache, createOpLog, createRunStore, createSettingsStore, openDb } from "./db.mjs";
+import { applyOps, normalizeOps, validateProjectPayload } from "./ops.mjs";
 import { createApprovalStore } from "./approvals.mjs";
 import { createAgentManager } from "./acp.mjs";
 import { createVideoEditManager } from "./video-edit.mjs";
@@ -183,6 +183,7 @@ function broadcast(event, exceptClientId) {
 const db = openDb(ROOT);
 const runStore = createRunStore(db);
 const catalog = createCatalogCache(db);
+const settings = createSettingsStore(db);
 const opLog = createOpLog(db);
 const gateway = createGateway();
 const bodyDir = path.join(ROOT, "tmp");
@@ -198,7 +199,7 @@ const engine = createRunEngine({
     opLog,
 });
 void engine.recover();
-const approvals = createApprovalStore({ engine, broadcast, log });
+const approvals = createApprovalStore({ engine, broadcast, log, autoApprove: () => Boolean(settings.get("agentAutoApprove", false)), stateFile: path.join(ROOT, "approvals.json") });
 const agent = createAgentManager({ broadcast, log });
 const videoEdits = createVideoEditManager({ runStore, engine, gateway, store, projectsDir: store.projectsDir, broadcast, log });
 
@@ -230,6 +231,24 @@ async function handle(req, res) {
 
     if (pathname === "/api/meta" && req.method === "GET") {
         return sendJson(res, 200, { root: ROOT, projectsDir: store.projectsDir, version: VERSION });
+    }
+
+    if (pathname === "/api/settings" && req.method === "GET") {
+        return sendJson(res, 200, { settings: { agentAutoApprove: Boolean(settings.get("agentAutoApprove", false)) } });
+    }
+
+    if (pathname === "/api/settings" && req.method === "PUT") {
+        if (!isBrowserRequest(req)) return sendJson(res, 403, { error: "confirmation_required", message: "偏好设置只能从画布 UI 修改" });
+        let body;
+        try {
+            body = JSON.parse(await readBody(req));
+        } catch (error) {
+            return sendJson(res, 400, { error: "invalid_json", message: error.message });
+        }
+        if (typeof body?.agentAutoApprove !== "boolean") return sendJson(res, 400, { error: "invalid_settings", message: "agentAutoApprove 必须是布尔值" });
+        settings.set("agentAutoApprove", body.agentAutoApprove);
+        log(`设置：agentAutoApprove=${body.agentAutoApprove}`);
+        return sendJson(res, 200, { settings: { agentAutoApprove: body.agentAutoApprove } });
     }
 
     // 项目列表（M0 直接返回完整文档：文档不含二进制，通常只有几十 KB）
@@ -492,8 +511,15 @@ async function handle(req, res) {
         return sendJson(res, 405, { error: "method_not_allowed" });
     }
 
+    if (pathname === "/api/agent/permissions" && req.method === "GET") {
+        const projectId = url.searchParams.get("projectId") || "";
+        const conversationId = url.searchParams.get("conversationId") || "";
+        return sendJson(res, 200, { permissions: agent.listPermissions(projectId, conversationId) });
+    }
+
     const permMatch = pathname.match(/^\/api\/agent\/permissions\/([A-Za-z0-9-]{1,64})$/);
     if (permMatch && req.method === "POST") {
+        if (!isBrowserRequest(req)) return sendJson(res, 403, { error: "confirmation_required", message: "Agent 权限必须由画布 UI 确认" });
         let body;
         try {
             body = JSON.parse(await readBody(req));
@@ -691,7 +717,25 @@ async function handle(req, res) {
             }
             const project = body?.project ?? body;
             if (!project || typeof project !== "object") return sendJson(res, 400, { error: "invalid_project" });
-            const saved = store.saveProject(id, project);
+            const existing = store.readProject(id);
+            if (existing && body?.expectRev != null && existing.rev !== body.expectRev) {
+                return sendJson(res, 409, { error: "rev_conflict", rev: existing.rev });
+            }
+            if (existing && body?.expectRev == null) {
+                return sendJson(res, 409, { error: "rev_required", rev: existing.rev, message: "覆盖已有画布必须带 expectRev，请改用 /ops 增量修改" });
+            }
+            let normalized;
+            try {
+                normalized = validateProjectPayload(project);
+            } catch (error) {
+                return sendJson(res, 400, { error: "invalid_project", message: error.message });
+            }
+            let saved;
+            try {
+                saved = store.saveProject(id, normalized);
+            } catch (error) {
+                return sendJson(res, 500, { error: "save_failed", message: error.message });
+            }
             if (saved.stripped > 0) log(`project ${id}: 剥离 ${saved.stripped} 个 dataURL（资产层接管前暂不支持内联图片）`);
             const clientId = String(req.headers["x-canvas-client"] || url.searchParams.get("client") || "");
             broadcast({ type: "project.updated", id, rev: saved.rev, clientId });

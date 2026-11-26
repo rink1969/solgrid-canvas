@@ -2,6 +2,12 @@
 
 ## Unreleased
 
++ [新增] 偏好设置新增「允许 Agent 自动发起生成」开关；开启后 MCP 生成请求自动通过审批，每日花费上限由 solgrid 平台控制。
++ [修复] ACP `request_permission` 增加可查询权限列表与前端轮询兜底，权限决策只允许画布 UI 确认。
++ [修复] 统一画布写入校验：全量 PUT 与 ops 共用节点/连线/几何校验，已有画布 PUT 必须带 expectRev。
++ [修复] ACP 会话创建增加 single-flight，避免 prepare 与首轮 prompt 并发创建两个会话。
++ [修复] transcript 在 done / error 时立即落盘，避免 400ms 防抖窗口内丢失最后一段消息。
++ [修复] 审批状态持久化到 `~/.solgrid-canvas/approvals.json`，daemon 重启后仍能回读 pending/expired。
 + [修复] Agent 生成审批改为异步批量：`canvas_run_nodes` 立即返回 `approvalId`，新增 `canvas_get_approval` / `canvas_wait_approval`；审批弹窗轮询兜底并显示队列数量。
 + [修复] 节点几何字段统一校验：`position.x/y`、`width/height` 归一化为数字，兼容顶层 x/y，非法值直接报错，避免静默写出坏画布。
 + [修复] `/api/runs` 与审批决策只接受画布 UI 请求，Agent/MCP 不能绕过审批直接发起付费生成。

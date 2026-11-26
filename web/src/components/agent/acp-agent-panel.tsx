@@ -17,6 +17,7 @@ import {
     getAgentStatus,
     getAgentTranscript,
     listAgentConversations,
+    listAgentPermissions,
     prepareAgentConversation,
     sendAgentPrompt,
     setAgentModel,
@@ -283,6 +284,7 @@ export function AcpAgentPanel({ floating = false, onToggleFloating }: { floating
         sendingRef.current = false;
         // 只有真正从 A 切到 B 才清空引用；首次加载（"" -> id）要保留右键发送进来的引用
         if (previous && previous !== activeId) useAgentStore.getState().setAgentState({ canvasReferences: [] });
+        setPermission(null);
         void loadTranscript(activeId).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
     }, [activeId, loadTranscript, projectId, storageKey]);
 
@@ -375,9 +377,18 @@ export function AcpAgentPanel({ floating = false, onToggleFloating }: { floating
         const timer = setInterval(async () => {
             if (activeProjectRef.current !== projectId) return;
             try {
-                const [transcript, list] = await Promise.all([getAgentTranscript(projectId, activeId), listAgentConversations(projectId)]);
+                const [transcript, list, permissions] = await Promise.all([
+                    getAgentTranscript(projectId, activeId),
+                    listAgentConversations(projectId),
+                    listAgentPermissions(projectId, activeId).catch(() => []),
+                ]);
                 if (!alive) return;
                 setConversations(list);
+                setPermission((current) => {
+                    if (current && permissions.some((item) => item.id === current.id)) return current;
+                    const next = permissions[0];
+                    return next ? { id: next.id, title: next.title || next.toolCall?.title } : null;
+                });
                 const current = list.find((item) => item.id === activeId);
                 const running = Boolean(current?.running);
                 if (!sendingRef.current && !running) setMessages(messagesFromTranscript(transcript.transcript));
@@ -548,8 +559,12 @@ export function AcpAgentPanel({ floating = false, onToggleFloating }: { floating
     const decide = async (allow: boolean) => {
         if (!permission) return;
         const id = permission.id;
-        setPermission(null);
-        await decideAgentPermission(id, allow).catch(() => undefined);
+        try {
+            await decideAgentPermission(id, allow);
+            setPermission(null);
+        } catch (error) {
+            setError(error instanceof Error ? error.message : String(error));
+        }
     };
 
     return (
