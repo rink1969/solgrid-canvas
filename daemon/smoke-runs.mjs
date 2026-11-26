@@ -55,9 +55,15 @@ try {
     const tools = await fetch(`${BASE}/api/tools?q=image`, { headers }).then((r) => r.json());
     check("tools list 返回候选", tools.results?.[0]?.endpoint === "/v1/fake-image", JSON.stringify(tools).slice(0, 200));
     const toolsCached = await fetch(`${BASE}/api/tools?q=image`, { headers }).then((r) => r.json());
-    check("tools list 走缓存", toolsCached.results?.[0]?.endpoint === "/v1/fake-image");
+    check("tools list 走缓存", toolsCached.cached === true && toolsCached.results?.[0]?.endpoint === "/v1/fake-image");
     const catalog = await fetch(`${BASE}/api/tools/catalog?refresh=1`, { headers }).then((r) => r.json());
-    check("tools categories 归入图片/视频/音频", catalog.catalog?.image?.[0]?.endpoint === "/v1/fake-image" && catalog.catalog?.video?.[0]?.endpoint === "/v1/video/fake" && catalog.catalog?.audio?.length >= 2, JSON.stringify(catalog).slice(0, 300));
+    const imageEndpoints = (catalog.catalog?.image || []).map((item) => item.endpoint);
+    const videoEndpoints = (catalog.catalog?.video || []).map((item) => item.endpoint);
+    check(
+        "tools categories 按 bucket 归入图片/视频/音频",
+        imageEndpoints.includes("/v1/fake-image") && imageEndpoints.includes("/v1/image/magic-hour-ai-gif") && videoEndpoints.includes("/v1/video/fake") && videoEndpoints.includes("/v1/image/magic-hour-ai-gif") && (catalog.catalog?.audio?.length || 0) >= 2,
+        JSON.stringify(catalog).slice(0, 300),
+    );
     const detail = await fetch(`${BASE}/api/tools/detail?provider=fake&endpoint=/v1/fake-image`, { headers }).then((r) => r.json());
     check("inspect 返回 schema", detail.detail?.input?.body?.properties?.prompt?.type === "string");
 

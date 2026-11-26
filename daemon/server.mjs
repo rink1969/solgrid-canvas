@@ -18,6 +18,9 @@ import { createGateway } from "./gateway.mjs";
 import { createRunEngine } from "./runs.mjs";
 
 const VERSION = "0.1.4";
+const CATALOG_TTL_MS = 24 * 60 * 60 * 1000;
+const TOOLS_QUERY_TTL_MS = 24 * 60 * 60 * 1000;
+const TOOL_DETAIL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const WEB_DIST = process.env.CANVAS_WEB_DIST || path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")), "..", "web", "dist");
 const MIME = {
     ".html": "text/html; charset=utf-8",
@@ -254,6 +257,8 @@ async function handle(req, res) {
         const query = String(url.searchParams.get("q") || "").trim();
         if (!query) return sendJson(res, 400, { error: "missing_query" });
         const key = `tools:q:${query}`;
+        const cached = catalog.get(key, TOOLS_QUERY_TTL_MS);
+        if (cached) return sendJson(res, 200, { results: cached, cached: true });
         try {
             const data = await gateway.listTools({ query, limit: 20 });
             const results = (data.items || [])
@@ -270,10 +275,10 @@ async function handle(req, res) {
 
     // 平台模型目录：solgrid tools categories + list，按类别归到图片/视频/音频，缓存 24h（?refresh=1 强制刷新）
     if (pathname === "/api/tools/catalog" && req.method === "GET") {
-        const key = "catalog:v2";
+        const key = "catalog:v3";
         const force = url.searchParams.get("refresh") === "1";
         if (!force) {
-            const cached = catalog.get(key, 24 * 60 * 60 * 1000);
+            const cached = catalog.get(key, CATALOG_TTL_MS);
             if (cached) return sendJson(res, 200, { catalog: cached, cached: true });
         }
         try {
@@ -291,9 +296,16 @@ async function handle(req, res) {
                     for (const item of data.items || []) {
                         if (!item?.provider || !item?.endpoint) continue;
                         const id = `${item.provider}|${item.endpoint}`;
-                        if (seen.has(id)) continue;
-                        seen.add(id);
-                        buckets[bucket].push({ provider: item.provider, endpoint: item.endpoint, description: item.description, price: item.price });
+                        // 同一工具可能同时属于多个类别（如 magic-hour: video,image），
+                        // 去重必须按 bucket 分开，否则先处理 video 会把 image 里的条目吞掉。
+                        const itemBuckets = new Set((item.categories || []).map((code) => categoryBuckets[code]).filter(Boolean));
+                        if (!itemBuckets.size) itemBuckets.add(bucket);
+                        for (const targetBucket of itemBuckets) {
+                            const key = `${targetBucket}|${id}`;
+                            if (seen.has(key)) continue;
+                            seen.add(key);
+                            buckets[targetBucket].push({ provider: item.provider, endpoint: item.endpoint, description: item.description, price: item.price });
+                        }
                     }
                     totalPages = Math.max(1, Number(data.totalPages) || 1);
                     page += 1;
@@ -316,6 +328,8 @@ async function handle(req, res) {
         const endpoint = String(url.searchParams.get("endpoint") || "").trim();
         if (!provider || !endpoint) return sendJson(res, 400, { error: "missing_provider_or_endpoint" });
         const key = `inspect:${provider}:${endpoint}`;
+        const cached = catalog.get(key, TOOL_DETAIL_TTL_MS);
+        if (cached) return sendJson(res, 200, { detail: cached, skeleton: skeletonFromSchema(cached?.input?.body), cached: true });
         try {
             const detail = await gateway.inspect(provider, endpoint);
             catalog.put(key, detail);

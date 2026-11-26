@@ -92,6 +92,7 @@ if (command === "files" && argv[1] === "upload") {
 const FAKE_TOOLS = [
     { provider: "fake", providerName: "Fake", endpoint: "/v1/fake-image", displayName: "fake-image", description: "fake image tool", price: { type: "PER_CALL", amount: { value: "3.9", currency: "Spark" } }, categories: ["image"], tags: ["image"], invocationEnabled: true },
     { provider: "fake", providerName: "Fake", endpoint: "/v1/video/fake", displayName: "fake-video", description: "fake video tool", price: { type: "PER_CALL", amount: { value: "9", currency: "Spark" } }, categories: ["video"], tags: ["video"], invocationEnabled: true },
+    { provider: "fake", providerName: "Fake", endpoint: "/v1/image/magic-hour-ai-gif", displayName: "fake-gif", description: "fake multi-category tool", price: { type: "PER_CALL", amount: { value: "4", currency: "Spark" } }, categories: ["video", "image"], tags: ["video", "image"], invocationEnabled: true },
     { provider: "fake", providerName: "Fake", endpoint: "/v1/text-to-speech", displayName: "fake-tts", description: "fake speech tool", price: { type: "PER_CALL", amount: { value: "1", currency: "Spark" } }, categories: ["speech"], tags: ["audio"], invocationEnabled: true },
     { provider: "fake", providerName: "Fake", endpoint: "/v1/music", displayName: "fake-music", description: "fake music tool", price: { type: "PER_CALL", amount: { value: "2", currency: "Spark" } }, categories: ["music"], tags: ["audio"], invocationEnabled: true },
 ];

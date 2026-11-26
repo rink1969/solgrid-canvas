@@ -2,6 +2,9 @@
 
 ## Unreleased
 
++ [修复] catalog 对同时属于 video/image 的工具按 bucket 分别去重，magic-hour 等不再从生图列表消失。
++ [优化] `/api/tools`、`/api/tools/catalog`、`/api/tools/detail` 改为缓存优先（搜索/目录 24h、详情 7d），不再每次请求都调用 solgrid CLI。
+
 + [修复] 节点模型下拉改用平台 catalog 分类数据，不再用 `tools list -q "image generation"` 文本搜索导致「暂无数据」。
 
 + [调整] 适配 solgrid CLI 0.7：工具搜索与模型目录改用 `solgrid tools list` / `tools categories`，不再依赖 `discover -q`。
