@@ -9,9 +9,10 @@ function summarize(approval: CanvasApproval) {
     const params = approval.params || {};
     const prompt = typeof params.prompt === "string" ? params.prompt : "";
     const count = Number(params.count) || 1;
+    const nodes = Array.isArray(approval.items) && approval.items.length ? approval.items.length : 1;
     const seconds = params.seconds ? `${params.seconds}s` : "";
     const resolution = typeof params.resolution === "string" ? params.resolution : "";
-    return { prompt, count, seconds, resolution };
+    return { prompt, count, seconds, resolution, nodes };
 }
 
 // Agent 通过 MCP 请求生成时，在这里等用户确认；不点就不花钱
@@ -20,10 +21,17 @@ export function ApprovalCenter({ projectId }: { projectId: string }) {
     const [deciding, setDeciding] = useState<string | null>(null);
 
     useEffect(() => {
-        listPendingApprovals(projectId)
-            .then((items) => setApprovals(items))
-            .catch(() => undefined);
-
+        let alive = true;
+        const load = () => {
+            listPendingApprovals(projectId)
+                .then((items) => {
+                    if (alive) setApprovals(items);
+                })
+                .catch(() => undefined);
+        };
+        load();
+        // SSE 只是加速；审批弹窗必须能靠轮询兜底，避免事件丢失后 Agent 一直等。
+        const timer = window.setInterval(load, 3000);
         const onApproval = (event: Event) => {
             const detail = (event as CustomEvent<{ type: string; approval?: CanvasApproval; id?: string }>).detail;
             if (!detail) return;
@@ -35,7 +43,11 @@ export function ApprovalCenter({ projectId }: { projectId: string }) {
             }
         };
         window.addEventListener("canvas:approval", onApproval);
-        return () => window.removeEventListener("canvas:approval", onApproval);
+        return () => {
+            alive = false;
+            window.clearInterval(timer);
+            window.removeEventListener("canvas:approval", onApproval);
+        };
     }, [projectId]);
 
     const decide = async (approval: CanvasApproval, allow: boolean) => {
@@ -50,11 +62,11 @@ export function ApprovalCenter({ projectId }: { projectId: string }) {
 
     const current = approvals[0];
     if (!current) return null;
-    const { prompt, count, seconds, resolution } = summarize(current);
+    const { prompt, count, seconds, resolution, nodes } = summarize(current);
     const kind = current.endpoint.includes("/video/") ? "video" : current.endpoint.includes("/audio/") || current.endpoint.includes("t2a") ? "audio" : "image";
 
     return (
-        <Modal open title="Agent 请求生成" onCancel={() => void decide(current, false)} footer={null} width={520} maskClosable={false}>
+        <Modal open title={`Agent 请求生成（待审批 ${approvals.length} 个）`} onCancel={() => void decide(current, false)} footer={null} width={520} maskClosable={false}>
             <div className="space-y-3 text-sm">
                 <div className="flex items-center gap-2">
                     <Tag color="blue">花费用平台计费</Tag>
@@ -66,6 +78,7 @@ export function ApprovalCenter({ projectId }: { projectId: string }) {
                     <div>
                         类型：{MODE_LABEL[kind] || kind}
                         {kind === "image" ? ` · ${count} 张` : ""}
+                        {nodes > 1 ? ` · ${nodes} 个节点` : ""}
                         {seconds ? ` · ${seconds}` : ""}
                         {resolution ? ` · ${resolution}` : ""}
                     </div>

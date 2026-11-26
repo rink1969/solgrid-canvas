@@ -6,6 +6,7 @@ export type CanvasApproval = {
     provider: string;
     endpoint: string;
     params: Record<string, unknown>;
+    items?: Array<{ nodeId?: string | null; provider: string; endpoint: string; params: Record<string, unknown> }>;
     createdAt?: string;
 };
 

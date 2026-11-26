@@ -81,7 +81,9 @@ export function AgentChatTimeline({
                 <div ref={contentRef} className="space-y-4 px-4 pt-4">
                     {timeline.map((entry) => entry.type === "commands"
                         ? <AgentCommandGroupRow key={entry.id} items={entry.items} theme={theme} />
-                        : <AgentChatMessageRow key={entry.item.id} item={entry.item} theme={theme} />)}
+                        : entry.type === "process"
+                          ? <AgentProcessGroupRow key={entry.id} items={entry.items} theme={theme} />
+                          : <AgentChatMessageRow key={entry.item.id} item={entry.item} theme={theme} />)}
                     {pendingTool ? (
                         <AgentPendingToolCard
                             summary={summarizeCanvasAgentOps(pendingTool.input?.ops || []) || toolName(pendingTool.name)}
@@ -131,21 +133,68 @@ const AgentCommandGroupRow = memo(function AgentCommandGroupRow({ items, theme }
     );
 });
 
-type AgentTimelineEntry = { type: "message"; item: AgentChatItem } | { type: "commands"; id: string; items: AgentChatItem[] };
+function formatProcessDuration(items: AgentChatItem[]) {
+    const starts = items.map((item) => Date.parse(item.startedAt || "")).filter((value) => Number.isFinite(value));
+    const ends = items.map((item) => Date.parse(item.endedAt || item.startedAt || "")).filter((value) => Number.isFinite(value));
+    if (!starts.length || !ends.length) return "";
+    const seconds = Math.max(0, Math.round((Math.max(...ends) - Math.min(...starts)) / 1000));
+    if (seconds < 60) return `${seconds}s`;
+    return `${Math.floor(seconds / 60)}m${seconds % 60}s`;
+}
+
+function formatItemDuration(item: AgentChatItem) {
+    const start = Date.parse(item.startedAt || "");
+    const end = Date.parse(item.endedAt || item.startedAt || "");
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return "";
+    const seconds = Math.max(0, Math.round((end - start) / 1000));
+    return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m${seconds % 60}s`;
+}
+
+function AgentProcessGroupRow({ items, theme }: { items: AgentChatItem[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    const toolCount = items.filter((item) => item.role === "tool").length;
+    const duration = formatProcessDuration(items);
+    return (
+        <details className="rounded-lg border px-3 py-2 text-xs" style={{ borderColor: theme.node.stroke, color: theme.node.muted }}>
+            <summary className="cursor-pointer select-none opacity-70 hover:opacity-100">
+                过程 · {items.length} 步{toolCount ? ` · ${toolCount} 次工具调用` : ""}{duration ? ` · ${duration}` : ""}
+            </summary>
+            <div className="mt-2 space-y-2 px-1">
+                {items.map((item) => (
+                    <div key={item.id}>
+                        <div className="mb-0.5 text-[10px] opacity-50">
+                            {item.role === "system" ? "思考" : item.title || "工具"}
+                            {formatItemDuration(item) ? ` · ${formatItemDuration(item)}` : ""}
+                        </div>
+                        <AgentChatMessageRow item={item} theme={theme} />
+                    </div>
+                ))}
+            </div>
+        </details>
+    );
+}
+
+type AgentTimelineEntry = { type: "message"; item: AgentChatItem } | { type: "commands"; id: string; items: AgentChatItem[] } | { type: "process"; id: string; items: AgentChatItem[] };
 
 function groupTimelineMessages(messages: AgentChatItem[]) {
     const timeline: AgentTimelineEntry[] = [];
     let commands: AgentChatItem[] = [];
     let commandScope = "";
+    let process: AgentChatItem[] = [];
     const flushCommands = () => {
         if (!commands.length) return;
         timeline.push({ type: "commands", id: `commands:${commands[0].id}`, items: commands });
         commands = [];
         commandScope = "";
     };
+    const flushProcess = () => {
+        if (!process.length) return;
+        timeline.push({ type: "process", id: `process:${process[0].id}`, items: process });
+        process = [];
+    };
     messages.forEach((item) => {
         if (isPlanMessage(item)) return;
         if (isCommandMessage(item)) {
+            flushProcess();
             const scope = item.threadId && item.turnId ? `${item.threadId}\0${item.turnId}` : item.id;
             if (commands.length && scope !== commandScope) flushCommands();
             commands.push(item);
@@ -153,8 +202,14 @@ function groupTimelineMessages(messages: AgentChatItem[]) {
             return;
         }
         flushCommands();
+        if (item.role === "tool" || item.role === "system") {
+            process.push(item);
+            return;
+        }
+        flushProcess();
         timeline.push({ type: "message", item });
     });
+    flushProcess();
     flushCommands();
     return timeline;
 }

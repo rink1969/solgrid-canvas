@@ -17,6 +17,7 @@ import {
     getAgentStatus,
     getAgentTranscript,
     listAgentConversations,
+    prepareAgentConversation,
     sendAgentPrompt,
     setAgentModel,
     type AgentConfigOption,
@@ -58,10 +59,10 @@ function modelOf(configOptions: AgentConfigOption[]): { models: AgentModel[]; cu
 
 function messagesFromTranscript(transcript: AgentTranscriptItem[]): AgentChatItem[] {
     return transcript.map((item, index) => {
-        if (item.role === "user") return { id: `user-${index}`, role: "user", text: item.text || "" };
-        if (item.role === "thought") return { id: `thought-${index}`, role: "system", text: item.text || "" };
-        if (item.role === "tool") return { id: item.toolCallId || `tool-${index}`, role: "tool", title: item.title || "工具", text: item.status || "", detail: { status: item.status } };
-        return { id: `assistant-${index}`, role: "assistant", text: item.text || "" };
+        if (item.role === "user") return { id: `user-${index}`, role: "user", text: item.text || "", startedAt: item.startedAt };
+        if (item.role === "thought") return { id: `thought-${index}`, role: "system", text: item.text || "", startedAt: item.startedAt, endedAt: item.endedAt };
+        if (item.role === "tool") return { id: item.toolCallId || `tool-${index}`, role: "tool", title: item.title || "工具", text: item.status || "", detail: { status: item.status }, startedAt: item.startedAt, endedAt: item.endedAt };
+        return { id: `assistant-${index}`, role: "assistant", text: item.text || "", startedAt: item.startedAt };
     });
 }
 
@@ -191,6 +192,12 @@ export function AcpAgentPanel({ floating = false, onToggleFloating }: { floating
                 activeProjectRef.current = projectId;
                 setActiveId(id);
                 await loadTranscript(id);
+                const current = list.find((item) => item.id === id);
+                if (current && !(current.configOptions || []).length) {
+                    void prepareAgentConversation(projectId, id)
+                        .then((prepared) => setConversations((prev) => prev.map((item) => (item.id === prepared.id ? { ...item, ...prepared } : item))))
+                        .catch(() => undefined);
+                }
             }
         } catch (cause) {
             setAvailable(false);
@@ -305,7 +312,7 @@ export function AcpAgentPanel({ floating = false, onToggleFloating }: { floating
                 setMessages((prev) => {
                     const last = prev[prev.length - 1];
                     if (last?.role === "user" && last.text === (detail.text || "")) return prev;
-                    return [...prev, { id: `u-${Date.now()}`, role: "user", text: detail.text || "" }];
+                    return [...prev, { id: `u-${Date.now()}`, role: "user", text: detail.text || "", startedAt: new Date().toISOString() }];
                 });
                 return;
             }
@@ -319,25 +326,42 @@ export function AcpAgentPanel({ floating = false, onToggleFloating }: { floating
             if (detail.kind !== "update") return;
             const update = detail.update || {};
             const kind = update.sessionUpdate || update.type;
-            if (kind === "agent_message_chunk") {
+            if (kind === "agent_thought_chunk") {
                 const text = update.content?.text || "";
+                const now = new Date().toISOString();
                 setMessages((prev) => {
                     const last = prev[prev.length - 1];
-                    if (last?.role === "assistant" && last.id === `as-${update.messageId}`) {
+                    if (last?.role === "system" && last.id === `th-${update.messageId}`) {
                         const copy = [...prev];
                         copy[copy.length - 1] = { ...last, text: `${last.text}${text}`, streamId: update.messageId };
                         return copy;
                     }
-                    return [...prev, { id: `as-${update.messageId}`, role: "assistant", text, streamId: update.messageId }];
+                    const closed = last?.role === "system" && !last.endedAt ? prev.map((item) => (item === last ? { ...item, endedAt: now } : item)) : prev;
+                    return [...closed, { id: `th-${update.messageId}`, role: "system", text, streamId: update.messageId, startedAt: now }];
+                });
+                return;
+            }
+            if (kind === "agent_message_chunk") {
+                const text = update.content?.text || "";
+                const now = new Date().toISOString();
+                setMessages((prev) => {
+                    const last = prev[prev.length - 1];
+                    const closed = last?.role === "system" && !last.endedAt ? prev.map((item) => (item === last ? { ...item, endedAt: now } : item)) : prev;
+                    if (last?.role === "assistant" && last.id === `as-${update.messageId}`) {
+                        const copy = [...closed];
+                        copy[copy.length - 1] = { ...last, text: `${last.text}${text}`, streamId: update.messageId };
+                        return copy;
+                    }
+                    return [...closed, { id: `as-${update.messageId}`, role: "assistant", text, streamId: update.messageId, startedAt: now }];
                 });
                 return;
             }
             if (kind === "tool_call") {
-                setMessages((prev) => [...prev, { id: update.toolCallId, role: "tool", title: update.title || "工具", text: update.kind || "", detail: { status: update.status || "running" } }]);
+                setMessages((prev) => [...prev, { id: update.toolCallId, role: "tool", title: update.title || "工具", text: update.kind || "", detail: { status: update.status || "running" }, startedAt: new Date().toISOString() }]);
                 return;
             }
             if (kind === "tool_call_update") {
-                setMessages((prev) => prev.map((item) => (item.id === update.toolCallId ? { ...item, detail: { status: update.status } } : item)));
+                setMessages((prev) => prev.map((item) => (item.id === update.toolCallId ? { ...item, detail: { status: update.status }, endedAt: new Date().toISOString() } : item)));
             }
         };
         window.addEventListener("canvas:agent", handler);
@@ -485,8 +509,14 @@ export function AcpAgentPanel({ floating = false, onToggleFloating }: { floating
         if (!projectId) return;
         try {
             const created = await createAgentConversation(projectId);
-            setConversations((prev) => [created, ...prev]);
-            setActiveId(created.id);
+            let conversation = created;
+            try {
+                conversation = await prepareAgentConversation(projectId, created.id);
+            } catch {
+                /* ACP 不可用时仍然保留新对话，第一轮由发送时再建立会话 */
+            }
+            setConversations((prev) => [conversation, ...prev]);
+            setActiveId(conversation.id);
             setMessages([]);
             setError("");
             setTab("chat");

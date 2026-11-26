@@ -42,6 +42,11 @@ export function assetFilePath(projectsDir, projectId, file) {
 export function receiveAsset(req, projectsDir, projectId, mime) {
     return new Promise((resolve, reject) => {
         if (!PROJECT_ID.test(projectId)) return reject(new Error("invalid project id"));
+        const normalizedMime = String(mime || "").toLowerCase();
+        const allowedImages = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+        if (normalizedMime.startsWith("image/") && !allowedImages.has(normalizedMime)) {
+            return reject(new Error(`不支持的图片格式：${normalizedMime}；请先转成 PNG/JPEG/WebP 再上传`));
+        }
         const dir = path.join(projectsDir, projectId, "assets");
         fs.mkdirSync(dir, { recursive: true });
         const tmp = path.join(dir, `.upload-${crypto.randomUUID()}.tmp`);

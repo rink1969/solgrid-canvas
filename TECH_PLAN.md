@@ -433,7 +433,7 @@ Composition = {
 | `canvas_place_artifacts` | 批量落地产物 | `anchor + layout: right-cols / grid / row`，自动避让、自动连线、自动打组（拉片核心） |
 | `canvas_import_local` | 本机文件 → 节点 | 路径白名单；返回 assetId |
 | `canvas_estimate` | 估价 | 返回 Spark/USD/计费口径，**不花钱** |
-| `canvas_run_nodes` | 入队生成 | 声明有副作用 → 走 ACP `request_permission`；非 ACP 通道用 `confirmToken`；`maxCostSpark` 超限直接拒 |
+| `canvas_run_nodes` | 创建审批并立即返回 `approvalId` | 用户允许后批量入队；`maxCostSpark` 超限直接拒 |
 | `canvas_watch` | 等结果 | 长轮询到超时，返回状态/成本/产物 |
 | `canvas_cancel` | 取消 | 复用 run stop 语义 |
 | `canvas_compose` | 图 → 时间线 | 选节点、顺序、转场 |

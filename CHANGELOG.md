@@ -2,6 +2,18 @@
 
 ## Unreleased
 
++ [修复] Agent 生成审批改为异步批量：`canvas_run_nodes` 立即返回 `approvalId`，新增 `canvas_get_approval` / `canvas_wait_approval`；审批弹窗轮询兜底并显示队列数量。
++ [修复] 节点几何字段统一校验：`position.x/y`、`width/height` 归一化为数字，兼容顶层 x/y，非法值直接报错，避免静默写出坏画布。
++ [修复] `/api/runs` 与审批决策只接受画布 UI 请求，Agent/MCP 不能绕过审批直接发起付费生成。
++ [修复] 配置节点显示生成产物预览；视频节点补上「查看视频」和侧栏预览。
++ [修复] 浮动 Agent 窗口支持调整高度，拖动改为小把手，不再占用整行。
++ [修复] 新对话创建后预启动 ACP 会话，首轮发送前就能选择模型。
++ [修复] Agent 思考/工具调用按「过程」折叠，显示总耗时与单条耗时；计划卡默认折叠。
++ [修复] Agent 响应期间输入框保持可编辑；并发 prompt 返回 409 + Retry-After，不再硬拒 400。
++ [修复] run 队列显示排队位次；`canvas_place_artifacts` 支持 row/column/grid；inbox 不存在时自动创建。
++ [修复] 拒绝 AVIF/SVG 等未支持图片格式并提示转码，避免转发给下游后才失败。
++ [修复] `canvas_list_tools` 返回 invocationEnabled / unavailableReason，端点不可用可见。
++ [文档] 补充 `add_edge` 字段、`op.type`、`update_meta` 可写键与 `canvas_get_state` 的 viewport 返回说明。
 + [文档] 标注 solgrid CLI 最低版本 0.7（需要 tools 子命令）。
 + [修复] catalog 对同时属于 video/image 的工具按 bucket 分别去重，magic-hour 等不再从生图列表消失。
 + [优化] `/api/tools`、`/api/tools/catalog`、`/api/tools/detail` 改为缓存优先（搜索/目录 24h、详情 7d），不再每次请求都调用 solgrid CLI。

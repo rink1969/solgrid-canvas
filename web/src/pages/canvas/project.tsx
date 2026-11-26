@@ -3982,7 +3982,7 @@ function InfiniteCanvasPage() {
                 {angleNode?.metadata?.content ? <CanvasNodeAngleDialog dataUrl={angleNode.metadata.content} open={Boolean(angleNode)} onClose={() => setAngleNodeId(null)} onConfirm={(params) => void generateAngleNode(angleNode!, params)} /> : null}
 
                 <Modal
-                    title={t("canvas.projectPage.imageDetails")}
+                    title={previewNode?.type === CanvasNodeType.Video ? "视频详情" : t("canvas.projectPage.imageDetails")}
                     open={Boolean(previewContent)}
                     centered
                     onCancel={() => setPreviewNodeId(null)}
@@ -3990,7 +3990,13 @@ function InfiniteCanvasPage() {
                     width="auto"
                     styles={{ body: { padding: 0, display: "flex", justifyContent: "center", alignItems: "center", maxHeight: "80vh" } }}
                 >
-                    {previewContent ? <img src={previewContent} alt={previewNode?.title || t("assets.kinds.image")} style={{ maxWidth: "100%", maxHeight: "80vh", objectFit: "contain" }} /> : null}
+                    {previewContent ? (
+                        previewNode?.type === CanvasNodeType.Video ? (
+                            <video src={previewContent} controls autoPlay loop playsInline style={{ maxWidth: "100%", maxHeight: "80vh", objectFit: "contain" }} />
+                        ) : (
+                            <img src={previewContent} alt={previewNode?.title || t("assets.kinds.image")} style={{ maxWidth: "100%", maxHeight: "80vh", objectFit: "contain" }} />
+                        )
+                    ) : null}
                 </Modal>
 
                 <Modal

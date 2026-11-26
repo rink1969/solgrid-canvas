@@ -149,10 +149,11 @@ export function createGateway() {
             const json = await callCli(["tools", "categories", "-j"], "tools");
             return unwrap(json).items || [];
         },
-        async listTools({ category, query, limit = 100, page = 1 } = {}) {
+        async listTools({ category, query, limit = 100, page = 1, includeUnavailable = false } = {}) {
             const args = ["tools", "list", "-j", "-l", String(limit), "--page", String(page)];
             if (category) args.push("-c", String(category));
             if (query) args.push("-q", sanitizeQuery(query));
+            if (includeUnavailable) args.push("--include-unavailable");
             const json = await callCli(args, "tools");
             return unwrap(json);
         },

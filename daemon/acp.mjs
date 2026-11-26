@@ -259,6 +259,10 @@ export function createAgentManager({ broadcast, log }) {
                 emit(projectId, conversation.id, { kind: "conversation", action: "created" });
                 return summary(projectId, conversation);
             },
+            async prepareConversation(projectId, cwd, conversationId) {
+                await this.ensureSession(projectId, cwd, conversationId);
+                return summary(projectId, findConversation(projectId, cwd, conversationId));
+            },
             renameConversation(projectId, cwd, conversationId, title) {
                 const conversation = findConversation(projectId, cwd, conversationId);
                 conversation.title = String(title || "").trim() || conversation.title;
@@ -366,7 +370,7 @@ export function createAgentManager({ broadcast, log }) {
             },
             async prompt(projectId, cwd, conversationId, text) {
                 const runtime = await this.ensureSession(projectId, cwd, conversationId);
-                if (runtime.running) throw new Error("上一轮还在进行中");
+                if (runtime.running) throw Object.assign(new Error("上一轮还在进行中"), { code: "agent_busy" });
                 runtime.running = true;
                 const conversation = findConversation(projectId, cwd, conversationId);
                 if (!conversation.title || conversation.title === "新对话") conversation.title = String(text).slice(0, 24);
@@ -385,6 +389,9 @@ export function createAgentManager({ broadcast, log }) {
                 promise
                     .then((result) => {
                         runtime.running = false;
+                        const endedAt = new Date().toISOString();
+                        const tail = runtime.transcript[runtime.transcript.length - 1];
+                        if (tail && tail.role === "thought" && !tail.endedAt) tail.endedAt = endedAt;
                         conversation.updatedAt = new Date().toISOString();
                         saveConversations(projectId);
                         persistTranscript(projectId, conversationId, cwd, runtime.transcript);
@@ -392,6 +399,9 @@ export function createAgentManager({ broadcast, log }) {
                     })
                     .catch((error) => {
                         runtime.running = false;
+                        const endedAt = new Date().toISOString();
+                        const tail = runtime.transcript[runtime.transcript.length - 1];
+                        if (tail && tail.role === "thought" && !tail.endedAt) tail.endedAt = endedAt;
                         persistTranscript(projectId, conversationId, cwd, runtime.transcript);
                         if (/not found|unknown session|invalid session/i.test(error.message)) {
                             runtimes.delete(runtimeKey(projectId, conversationId));

@@ -107,6 +107,7 @@ export function RunHistoryLauncher({ projectId }: { projectId: string }) {
                                 <div className="flex items-center gap-2">
                                     <Tag color={status.color} className="!m-0">
                                         {status.text}
+                                        {run.status === "queued" && run.queuePosition ? ` #${run.queuePosition}` : ""}
                                     </Tag>
                                     <span className="min-w-0 flex-1 truncate font-mono">
                                         {run.provider} · {run.endpoint}
@@ -143,7 +144,7 @@ export function RunHistoryLauncher({ projectId }: { projectId: string }) {
                 {detail ? (
                     <div className="space-y-3 text-xs">
                         <div className="grid grid-cols-2 gap-2">
-                            <div>状态：{STATUS_LABEL[detail.status]?.text || detail.status}</div>
+                            <div>状态：{STATUS_LABEL[detail.status]?.text || detail.status}{detail.status === "queued" && detail.queuePosition ? `（第 ${detail.queuePosition} 位）` : ""}</div>
                             <div>花费：{formatCost(detail.costSpark)}</div>
                             <div className="col-span-2 font-mono break-all">模型：{detail.provider} · {detail.endpoint}</div>
                             {detail.remoteRunId ? <div className="col-span-2 break-all">平台 runId：{detail.remoteRunId}</div> : null}

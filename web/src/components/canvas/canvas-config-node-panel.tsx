@@ -87,6 +87,8 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                 </div>
             </div>
 
+            <ConfigArtifactPreview node={node} theme={theme} />
+
             <div className="mb-2 flex flex-wrap gap-1.5">
                 <InputChip label={t("canvas.configNode.prompt")} value={t("canvas.configNode.items", { count: inputSummary.textCount })} style={chipStyle} />
                 <InputChip label={t("canvas.configNode.references")} value={t("canvas.configNode.images", { count: inputSummary.imageCount })} style={chipStyle} />
@@ -138,6 +140,25 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                     )}
                 </span>
             </Button>
+        </div>
+    );
+}
+
+function ConfigArtifactPreview({ node, theme }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    const content = node.metadata?.content;
+    if (!content) return null;
+    const mode = node.metadata?.generationMode || "image";
+    return (
+        <div className="mb-2 min-h-0 cursor-default overflow-hidden rounded-lg border" style={{ borderColor: theme.node.stroke }} onMouseDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
+            {mode === "video" ? (
+                <video src={content} controls className="max-h-32 w-full bg-black object-contain" />
+            ) : mode === "audio" ? (
+                <audio src={content} controls className="w-full" />
+            ) : mode === "text" ? (
+                <div className="max-h-32 overflow-y-auto whitespace-pre-wrap px-2 py-1.5 text-xs opacity-80">{content}</div>
+            ) : (
+                <img src={content} alt={node.title} className="max-h-32 w-full object-contain" />
+            )}
         </div>
     );
 }

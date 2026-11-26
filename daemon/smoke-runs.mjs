@@ -27,7 +27,7 @@ const child = spawn(process.execPath, [path.join(here, "server.mjs")], {
 child.stdout.on("data", (chunk) => process.stdout.write(`[daemon] ${chunk}`));
 child.stderr.on("data", (chunk) => process.stderr.write(`[daemon:err] ${chunk}`));
 
-const headers = { "content-type": "application/json", "x-canvas-token": TOKEN };
+const headers = { "content-type": "application/json", "x-canvas-token": TOKEN, "x-canvas-client": "web" };
 
 async function waitHealth() {
     for (let i = 0; i < 60; i++) {
@@ -363,6 +363,34 @@ try {
     }
     const afterDecision = await fetch(`${BASE}/api/approvals?projectId=smokeproj&status=pending`, { headers }).then((r) => r.json());
     check("审批处理后不在待办里", !afterDecision.approvals.some((item) => item.id === approval.id));
+
+    // 批量审批：一次确认产生多个 run
+    const batch = await fetch(`${BASE}/api/approvals`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+            projectId: "smokeproj",
+            items: [
+                { nodeId: "node1", provider: "alibaba", endpoint: "/v1/image/qwen-image-3.0", params: { prompt: "批量 A" } },
+                { nodeId: "node1", provider: "alibaba", endpoint: "/v1/image/qwen-image-3.0", params: { prompt: "批量 B" } },
+            ],
+        }),
+    }).then((r) => r.json());
+    check("批量审批包含两个 items", batch.status === "pending" && batch.items?.length === 2, JSON.stringify(batch).slice(0, 200));
+    const batchDecided = await fetch(`${BASE}/api/approvals/${batch.id}/decision`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ allow: true }),
+    }).then((r) => r.json());
+    check("批量审批产生两个 run", batchDecided.status === "approved" && batchDecided.runs?.length === 2, JSON.stringify(batchDecided).slice(0, 200));
+
+    // 只有 token、没有浏览器确认头的请求不能绕过审批直接入队
+    const blocked = await fetch(`${BASE}/api/runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-canvas-token": TOKEN },
+        body: JSON.stringify({ projectId: "smokeproj", nodeId: "node1", provider: "alibaba", endpoint: "/v1/image/qwen-image-3.0", params: { prompt: "bypass" } }),
+    });
+    check("Agent token 不能绕过审批", blocked.status === 403, String(blocked.status));
 
     // 列表与取消
     const list = await fetch(`${BASE}/api/runs?projectId=smokeproj`, { headers }).then((r) => r.json());

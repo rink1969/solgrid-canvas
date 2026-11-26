@@ -329,7 +329,7 @@ function CanvasNodesTab({ nodes, selectedNodeIds, onFocusNode, onPreviewNode, on
                                         </span>
                                         {node.metadata?.status && node.metadata.status !== "idle" ? <span className="size-1.5 shrink-0 rounded-full" style={{ background: STATUS_COLOR[node.metadata.status] || "transparent" }} /> : null}
                                     </button>
-                                    {selectMode || !isImage ? null : (
+                                    {selectMode || !(isImage || node.type === CanvasNodeType.Video) ? null : (
                                         <div className="flex shrink-0 flex-col items-center gap-0.5 pr-1.5">
                                             <button type="button" onClick={() => onPreviewNode(node.id)} className="grid size-7 place-items-center rounded-md opacity-55 transition hover:bg-black/10 hover:opacity-100 dark:hover:bg-white/10" aria-label={t("canvas.sidePanel.preview")} title={t("canvas.sidePanel.preview")}>
                                                 <Eye className="size-3.5" />

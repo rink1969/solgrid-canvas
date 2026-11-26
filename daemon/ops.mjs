@@ -13,6 +13,40 @@ const JSON_CANVAS_FILE_MIME = [
 
 // 外部工具可能按 JSON Canvas 规范传 type:"file"；落库前还原成语义节点类型，
 // 否则 store 会把 JSON type 写成 text、语义类型留成 file，前端查不到渲染器。
+function toFiniteNumber(value, label) {
+    const number = Number(value);
+    ensure(Number.isFinite(number), `${label} 必须是数字`);
+    return number;
+}
+
+function normalizeDimension(value, label, fallback) {
+    if (value === undefined || value === null) return fallback;
+    const number = toFiniteNumber(value, label);
+    ensure(number > 0, `${label} 必须大于 0`);
+    return Math.round(number);
+}
+
+// 节点几何统一成 {position:{x,y}, width, height}：
+// 兼容外部按 JSON Canvas 传顶层 x/y，也拒绝 "abc" 这类会静默破坏渲染的值。
+function normalizeGeometry(node, current) {
+    const next = { ...node };
+    let position = next.position;
+    if (position === undefined && (next.x !== undefined || next.y !== undefined)) {
+        position = { x: next.x, y: next.y };
+    }
+    if (position === undefined) position = current?.position || { x: 0, y: 0 };
+    ensure(position && typeof position === "object", "position 必须是 {x,y}");
+    next.position = {
+        x: toFiniteNumber(position.x ?? current?.position?.x ?? 0, "position.x"),
+        y: toFiniteNumber(position.y ?? current?.position?.y ?? 0, "position.y"),
+    };
+    delete next.x;
+    delete next.y;
+    if (next.width !== undefined || current) next.width = normalizeDimension(next.width, "width", current?.width ?? 320);
+    if (next.height !== undefined || current) next.height = normalizeDimension(next.height, "height", current?.height ?? 240);
+    return next;
+}
+
 function normalizeAddedNode(node) {
     const ext = node["x-solgrid"] || {};
     let type = node.type;
@@ -23,7 +57,7 @@ function normalizeAddedNode(node) {
         ensure(type && type !== "file", "add_node 的 type=file 需要 x-solgrid.nodeType 或 metadata.mimeType（image/video/audio）");
     }
     ensure(typeof type === "string" && type.length > 0, "add_node 需要 node.type");
-    return { ...node, type };
+    return normalizeGeometry({ ...node, type });
 }
 
 export function normalizeOps(ops) {
@@ -51,7 +85,8 @@ export function applyOps(store, projectId, ops) {
             case "update_node": {
                 ensure(op.id && nodes.has(op.id), `update_node 节点不存在：${op.id}`);
                 const current = nodes.get(op.id);
-                nodes.set(op.id, { ...current, ...op.patch, metadata: { ...current.metadata, ...(op.patch?.metadata || {}) } });
+                const patch = normalizeGeometry(op.patch || {}, current);
+                nodes.set(op.id, { ...current, ...patch, metadata: { ...current.metadata, ...(patch.metadata || {}) } });
                 break;
             }
             case "remove_nodes": {
@@ -60,7 +95,7 @@ export function applyOps(store, projectId, ops) {
                 break;
             }
             case "add_edge": {
-                ensure(op.edge?.id && op.edge?.fromNodeId && op.edge?.toNodeId, "add_edge 需要完整 edge");
+                ensure(op.edge?.id && op.edge?.fromNodeId && op.edge?.toNodeId, 'add_edge 需要 edge.id / fromNodeId / toNodeId');
                 connections = [...connections.filter((edge) => edge.id !== op.edge.id), op.edge];
                 break;
             }
@@ -72,11 +107,20 @@ export function applyOps(store, projectId, ops) {
                 for (const key of META_KEYS) {
                     if (key in (op.patch || {})) meta[key] = op.patch[key];
                 }
+                if (meta.viewport !== undefined) {
+                    ensure(meta.viewport && typeof meta.viewport === "object", "viewport 必须是 {x,y,k}");
+                    meta.viewport = {
+                        x: toFiniteNumber(meta.viewport.x, "viewport.x"),
+                        y: toFiniteNumber(meta.viewport.y, "viewport.y"),
+                        k: toFiniteNumber(meta.viewport.k, "viewport.k"),
+                    };
+                    ensure(meta.viewport.k > 0, "viewport.k 必须大于 0");
+                }
                 break;
             }
             case "move_nodes": {
-                const dx = Number(op.dx) || 0;
-                const dy = Number(op.dy) || 0;
+                const dx = toFiniteNumber(op.dx ?? 0, "dx");
+                const dy = toFiniteNumber(op.dy ?? 0, "dy");
                 for (const id of op.ids || []) {
                     const current = nodes.get(id);
                     if (!current) continue;

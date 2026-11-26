@@ -89,6 +89,11 @@ const SENSITIVE_DIRS = [".ssh", ".aws", ".gnupg", ".config", ".dsh", ".codex", "
 
 // Agent 只能导入：项目目录、inbox、显式配置的根；敏感目录一律拒绝
 function resolveImportPath(projectId, filePath) {
+    try {
+        fs.mkdirSync(INBOX_DIR, { recursive: true });
+    } catch {
+        /* 目录创建失败时仍按原白名单逻辑报错 */
+    }
     let real;
     try {
         real = fs.realpathSync(path.resolve(filePath));
@@ -153,7 +158,7 @@ const TOOLS = [
     },
     {
         name: "canvas_get_state",
-        description: "读取一个画布：节点摘要、连线、标题。用于了解当前画面再决定怎么改。",
+        description: "读取一个画布：项目元信息（viewport/backgroundMode/showImageInfo）、节点摘要、连线、标题。用于了解当前画面再决定怎么改。",
         inputSchema: {
             type: "object",
             properties: {
@@ -172,7 +177,7 @@ const TOOLS = [
     {
         name: "canvas_apply_ops",
         description:
-            "批量修改画布，原子生效。op 类型：add_node{node} / update_node{id,patch} / remove_nodes{ids} / add_edge{edge} / remove_edges{ids} / update_meta{patch} / move_nodes{ids,dx,dy}。返回新 rev。",
+            "批量修改画布，原子生效。每个 op 用 type 判别：add_node{node} / update_node{id,patch} / remove_nodes{ids} / add_edge{edge} / remove_edges{ids} / update_meta{patch} / move_nodes{ids,dx,dy}。add_node.node 需 {id,type,position:{x,y},width,height}；add_edge.edge 需 {id,fromNodeId,toNodeId}；update_node.patch 几何字段用 position:{x,y}, width,height（也兼容顶层 x/y，必须为数字）。update_meta 可写 title/backgroundMode/showImageInfo/viewport/activeChatId/chatSessions。返回新 rev。",
         inputSchema: {
             type: "object",
             properties: {
@@ -209,7 +214,7 @@ const TOOLS = [
     {
         name: "canvas_place_artifacts",
         description:
-            "把一批产物放到画布上并自动布点（图片一列、文本一列，从锚点右侧展开，自动避让）。items 每项：{kind:'image'|'text'|'video'|'audio', path? 或 text? 或 storageKey?, title?, role?, width?, height?}。不要自己算坐标。",
+            "把一批产物放到画布上并自动布点。items 每项：{kind:'image'|'text'|'video'|'audio', path? 或 text? 或 storageKey?, title?, role?, width?, height?}。layout 可选 auto|row|column|grid（默认 auto），gap 为间距。不要自己算坐标。",
         inputSchema: {
             type: "object",
             properties: {
@@ -218,13 +223,15 @@ const TOOLS = [
                 items: { type: "array", items: { type: "object" } },
                 connect: { type: "boolean", default: true },
                 groupTitle: { type: "string" },
+                layout: { type: "string", enum: ["auto", "row", "column", "grid"], default: "auto" },
+                gap: { type: "number", description: "布局间距（像素，默认 48）" },
             },
             required: ["projectId", "anchorNodeId", "items"],
         },
     },
     {
         name: "canvas_list_tools",
-        description: "搜索 solgrid 平台上的模型/工具（provider + endpoint + 描述 + 价格）。",
+        description: "搜索 solgrid 平台上的模型/工具（provider + endpoint + 描述 + 价格 + invocationEnabled / unavailableReason）。",
         inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
     },
     {
@@ -239,19 +246,32 @@ const TOOLS = [
     {
         name: "canvas_run_nodes",
         description:
-            "对节点发起生成。会先向用户弹出审批（花费需要确认），批准后才入队；返回 runId。provider/endpoint 省略时用节点上已选好的；prompt 省略时用节点 prompt；参考图取上游连线节点。",
+            "为一批节点发起生成。会先向用户弹审批（花费需要确认），本工具立即返回 approvalId（不阻塞等待审批）；审批通过后用 canvas_get_approval / canvas_wait_approval 拿 runIds。nodeIds 可传多个，真正批量。provider/endpoint 省略时用节点上已选好的；prompt 省略时用节点 prompt；参考图取上游连线节点。",
         inputSchema: {
             type: "object",
             properties: {
                 projectId: { type: "string" },
-                nodeIds: { type: "array", items: { type: "string" }, description: "要生成的节点，默认取 nodeId" },
+                nodeIds: { type: "array", items: { type: "string" }, description: "要生成的所有节点（真正批量）；省略时用 nodeId 或默认节点" },
                 nodeId: { type: "string" },
                 provider: { type: "string" },
                 endpoint: { type: "string" },
                 params: { type: "object", description: "覆盖参数，如 prompt/size/count/seconds/resolution/videoMode/generateAudio" },
-                approvalTimeoutSeconds: { type: "number", default: 180 },
             },
             required: ["projectId"],
+        },
+    },
+    {
+        name: "canvas_get_approval",
+        description: "查询审批状态：pending / approved / denied / expired；approved 时返回 runs（runIds）。",
+        inputSchema: { type: "object", properties: { approvalId: { type: "string" } }, required: ["approvalId"] },
+    },
+    {
+        name: "canvas_wait_approval",
+        description: "等待审批结果（最长 timeoutSeconds，默认 30s）。超时仍为 pending 时原样返回，可再次调用；approved 时返回 runs。",
+        inputSchema: {
+            type: "object",
+            properties: { approvalId: { type: "string" }, timeoutSeconds: { type: "number", default: 30 } },
+            required: ["approvalId"],
         },
     },
     {
@@ -314,7 +334,7 @@ const HANDLERS = {
     async canvas_get_state({ projectId, nodeIds, includeConnections = true }) {
         const project = await getProject(projectId);
         const nodes = (nodeIds?.length ? project.nodes.filter((node) => nodeIds.includes(node.id)) : project.nodes).map(pickNodeSummary);
-        return { project: { id: project.id, title: project.title, rev: project.rev }, nodes, connections: includeConnections ? project.connections : undefined };
+        return { project: { id: project.id, title: project.title, rev: project.rev, viewport: project.viewport, backgroundMode: project.backgroundMode, showImageInfo: project.showImageInfo }, nodes, connections: includeConnections ? project.connections : undefined };
     },
 
     async canvas_get_node({ projectId, nodeId }) {
@@ -352,7 +372,7 @@ const HANDLERS = {
         return results;
     },
 
-    async canvas_place_artifacts({ projectId, anchorNodeId, items, connect = true, groupTitle }) {
+    async canvas_place_artifacts({ projectId, anchorNodeId, items, connect = true, groupTitle, layout = "auto", gap = 48 }) {
         const project = await getProject(projectId);
         const anchor = project.nodes.find((node) => node.id === anchorNodeId);
         if (!anchor) throw new Error(`锚点节点不存在：${anchorNodeId}`);
@@ -375,7 +395,7 @@ const HANDLERS = {
             prepared.push({ kind, title: item.title || path.basename(real), ...uploaded });
         }
 
-        const placements = layoutArtifacts({ anchor, items: prepared, nodes: project.nodes });
+        const placements = layoutArtifacts({ anchor, items: prepared, nodes: project.nodes, layout, gap: Number(gap) || 48 });
         const stamp = Date.now().toString(36);
         const ops = [];
         const created = [];
@@ -399,42 +419,54 @@ const HANDLERS = {
     },
 
     async canvas_list_tools({ query }) {
-        return (await api(`/api/tools?q=${encodeURIComponent(query)}`)).results;
+        return (await api(`/api/tools?q=${encodeURIComponent(query)}&include_unavailable=1`)).results;
     },
 
     async canvas_inspect_tool({ provider, endpoint }) {
         return api(`/api/tools/detail?provider=${encodeURIComponent(provider)}&endpoint=${encodeURIComponent(endpoint)}`);
     },
 
-    async canvas_run_nodes({ projectId, nodeId, nodeIds, provider, endpoint, params, approvalTimeoutSeconds = 180 }) {
+    async canvas_run_nodes({ projectId, nodeId, nodeIds, provider, endpoint, params }) {
         const project = await getProject(projectId);
-        const targetId = nodeId || nodeIds?.[0] || project.nodes.find((node) => node.type === "image" || node.type === "video" || node.type === "audio")?.id;
-        const node = project.nodes.find((item) => item.id === targetId);
-        if (!node) throw new Error("找不到要生成的节点");
-
-        const resolvedProvider = provider || node.metadata?.provider;
-        const resolvedEndpoint = endpoint || node.metadata?.endpoint;
-        if (!resolvedProvider || !resolvedEndpoint) throw new Error("节点还没有选择模型：请先在画布上选，或传 provider/endpoint");
-
-        const payload = { ...collectParams(node, project), ...(params || {}) };
-        const approval = await api("/api/approvals", {
-            method: "POST",
-            body: JSON.stringify({ projectId, nodeId: targetId, provider: resolvedProvider, endpoint: resolvedEndpoint, params: payload }),
+        const targets = (Array.isArray(nodeIds) && nodeIds.length ? nodeIds : [nodeId || project.nodes.find((node) => node.type === "image" || node.type === "video" || node.type === "audio")?.id]).filter(Boolean);
+        if (!targets.length) throw new Error("找不到要生成的节点");
+        const items = targets.map((targetId) => {
+            const node = project.nodes.find((item) => item.id === targetId);
+            if (!node) throw new Error(`节点不存在：${targetId}`);
+            const resolvedProvider = provider || node.metadata?.provider;
+            const resolvedEndpoint = endpoint || node.metadata?.endpoint;
+            if (!resolvedProvider || !resolvedEndpoint) throw new Error(`节点 ${targetId} 还没有选择模型：请先在画布上选，或传 provider/endpoint`);
+            return {
+                nodeId: targetId,
+                provider: resolvedProvider,
+                endpoint: resolvedEndpoint,
+                params: { ...collectParams(node, project), ...(params || {}) },
+            };
         });
+        const approval = await api("/api/approvals", { method: "POST", body: JSON.stringify({ projectId, items }) });
+        return {
+            approvalId: approval.id,
+            status: approval.status,
+            nodeIds: items.map((item) => item.nodeId),
+            count: items.length,
+            runs: (approval.runs || []).map((run) => ({ runId: run.id, nodeId: run.nodeId, status: run.status })),
+            runIds: (approval.runs || []).map((run) => run.id),
+            message: "已提交审批；用户允许后用 canvas_get_approval / canvas_wait_approval 获取 runIds，再用 canvas_watch_run 等结果。",
+        };
+    },
 
-        if (approval.status === "approved" && approval.run?.id) {
-            return { runId: approval.run.id, status: approval.run.status, nodeId: targetId };
-        }
+    async canvas_get_approval({ approvalId }) {
+        return api(`/api/approvals/${encodeURIComponent(approvalId)}`);
+    },
 
-        const deadline = Date.now() + Math.max(10, approvalTimeoutSeconds) * 1000;
+    async canvas_wait_approval({ approvalId, timeoutSeconds = 30 }) {
+        const deadline = Date.now() + Math.max(5, timeoutSeconds) * 1000;
         while (Date.now() < deadline) {
-            const state = await api(`/api/approvals/${approval.id}`);
-            if (state.status === "approved") return { runId: state.run?.id, status: state.run?.status, nodeId: targetId };
-            if (state.status === "denied") throw new Error("用户拒绝了这次生成");
-            if (state.status === "expired") throw new Error("审批超时，未执行生成");
+            const state = await api(`/api/approvals/${encodeURIComponent(approvalId)}`);
+            if (state.status && state.status !== "pending") return state;
             await new Promise((resolve) => setTimeout(resolve, 1000));
         }
-        throw new Error("审批超时，未执行生成");
+        return api(`/api/approvals/${encodeURIComponent(approvalId)}`);
     },
 
     async canvas_watch_run({ runId, timeoutSeconds = 300 }) {

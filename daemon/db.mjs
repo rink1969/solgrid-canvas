@@ -64,6 +64,7 @@ export function createRunStore(db) {
     const listStmt = db.prepare("SELECT * FROM runs WHERE project_id = ? ORDER BY created_at DESC LIMIT ?");
     const listAllStmt = db.prepare("SELECT * FROM runs ORDER BY created_at DESC LIMIT ?");
     const unfinishedStmt = db.prepare("SELECT * FROM runs WHERE status IN ('submitting', 'running') ORDER BY created_at");
+    const queuedStmt = db.prepare("SELECT id FROM runs WHERE status = 'queued' ORDER BY created_at, id");
 
     const hydrate = (row) =>
         row && {
@@ -96,6 +97,10 @@ export function createRunStore(db) {
         },
         nextQueued() {
             return hydrate(nextStmt.get());
+        },
+        queuePosition(id) {
+            const index = queuedStmt.all().findIndex((row) => row.id === id);
+            return index >= 0 ? index + 1 : 0;
         },
         update(id, patch) {
             updateStmt.run(

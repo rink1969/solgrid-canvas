@@ -75,7 +75,7 @@ export function AgentChatComposer({
                         ))}
                     </div>
                 ) : null}
-                <AgentChatPromptInput value={prompt} disabled={disabled || sending} placeholder={placeholder} theme={theme} onChange={onPromptChange} onSubmit={() => { if (canSubmit) void onSubmit(); }} onAddFiles={onAddFiles} />
+                <AgentChatPromptInput value={prompt} disabled={disabled} placeholder={sending ? "Agent 正在执行，可以继续输入，本轮结束后发送" : placeholder} theme={theme} onChange={onPromptChange} onSubmit={() => { if (canSubmit) void onSubmit(); }} onAddFiles={onAddFiles} />
                 <div className="@container mt-2 flex items-center justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-1">
                         {onAddFiles ? (

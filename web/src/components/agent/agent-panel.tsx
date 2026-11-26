@@ -10,9 +10,13 @@ import { useThemeStore } from "@/stores/use-theme-store";
 
 const PANEL_MOTION_SECONDS = CANVAS_AGENT_PANEL_MOTION_MS / 1000;
 const POSITION_KEY = "canvas-agent-panel-pos";
+const HEIGHT_KEY = "canvas-agent-panel-height";
 
-function clampPosition(x: number, y: number, width: number) {
-    const height = Math.min(720, Math.max(360, window.innerHeight - 48));
+function defaultFloatingHeight() {
+    return Math.min(720, Math.max(360, window.innerHeight - 48));
+}
+
+function clampPosition(x: number, y: number, width: number, height = defaultFloatingHeight()) {
     return {
         x: Math.max(8, Math.min(x, window.innerWidth - Math.min(width + 1, window.innerWidth - 16) - 8)),
         y: Math.max(8, Math.min(y, window.innerHeight - height - 8)),
@@ -28,14 +32,18 @@ export function AgentPanel() {
     const width = useAgentStore((state) => state.width);
     const [resizing, setResizing] = useState(false);
     const [floating, setFloating] = useState(() => localStorage.getItem("canvas-agent-panel-floating") === "1");
+    const [floatingHeight, setFloatingHeight] = useState(() => {
+        const saved = Number(localStorage.getItem(HEIGHT_KEY));
+        return Number.isFinite(saved) && saved >= 360 ? Math.min(720, saved) : defaultFloatingHeight();
+    });
     const [floatingPos, setFloatingPos] = useState(() => {
         try {
             const saved = JSON.parse(localStorage.getItem(POSITION_KEY) || "null") as { x?: number; y?: number } | null;
-            if (typeof saved?.x === "number" && typeof saved?.y === "number") return clampPosition(saved.x, saved.y, width);
+            if (typeof saved?.x === "number" && typeof saved?.y === "number") return clampPosition(saved.x, saved.y, width, floatingHeight);
         } catch {
             /* 忽略损坏的本地位置 */
         }
-        return clampPosition(window.innerWidth - width - 24, 24, width);
+        return clampPosition(window.innerWidth - width - 24, 24, width, floatingHeight);
     });
     const toggleFloating = () => {
         setFloating((current) => {
@@ -46,8 +54,8 @@ export function AgentPanel() {
     };
     useEffect(() => {
         if (!floating) return;
-        setFloatingPos((current) => clampPosition(current.x, current.y, width));
-    }, [floating, width]);
+        setFloatingPos((current) => clampPosition(current.x, current.y, width, floatingHeight));
+    }, [floating, width, floatingHeight]);
     const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
         if (!floating) return;
         event.preventDefault();
@@ -56,11 +64,29 @@ export function AgentPanel() {
         const base = { ...floatingPos };
         let last = base;
         const onMove = (moveEvent: PointerEvent) => {
-            last = clampPosition(base.x + moveEvent.clientX - startX, base.y + moveEvent.clientY - startY, width);
+            last = clampPosition(base.x + moveEvent.clientX - startX, base.y + moveEvent.clientY - startY, width, floatingHeight);
             setFloatingPos(last);
         };
         const onUp = () => {
             localStorage.setItem(POSITION_KEY, JSON.stringify(last));
+            window.removeEventListener("pointermove", onMove);
+            window.removeEventListener("pointerup", onUp);
+        };
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onUp);
+    };
+    const startHeightResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+        if (!floating) return;
+        event.preventDefault();
+        const startY = event.clientY;
+        const startHeight = floatingHeight;
+        let nextHeight = startHeight;
+        const onMove = (moveEvent: PointerEvent) => {
+            nextHeight = Math.min(720, Math.max(360, startHeight + moveEvent.clientY - startY));
+            setFloatingHeight(nextHeight);
+        };
+        const onUp = () => {
+            localStorage.setItem(HEIGHT_KEY, String(nextHeight));
             window.removeEventListener("pointermove", onMove);
             window.removeEventListener("pointerup", onUp);
         };
@@ -99,7 +125,7 @@ export function AgentPanel() {
             style={{
                 overflow: floating ? "visible" : "clip",
                 pointerEvents: panelOpen && !panelClosing ? undefined : "none",
-                ...(floating ? { left: floatingPos.x, top: floatingPos.y, height: Math.min(720, Math.max(360, window.innerHeight - 48)) } : null),
+                ...(floating ? { left: floatingPos.x, top: floatingPos.y, height: floatingHeight } : null),
             }}
         >
             <motion.aside
@@ -112,16 +138,15 @@ export function AgentPanel() {
             >
                 {floating ? (
                     <div
-                        className="flex h-9 shrink-0 cursor-move items-center gap-2 rounded-t-xl border-b px-3 text-xs opacity-70 select-none"
-                        style={{ borderColor: theme.node.stroke, color: theme.node.muted }}
+                        className="absolute left-1/2 top-0 z-50 flex h-5 w-12 -translate-x-1/2 cursor-move items-center justify-center rounded-bl-md opacity-50 hover:opacity-90"
                         onPointerDown={startDrag}
                         title="拖动窗口"
                     >
-                        <Move className="size-3.5" />
-                        <span>拖动窗口</span>
+                        <Move className="size-3" />
                     </div>
                 ) : null}
-                <button type="button" className="absolute inset-y-0 left-0 z-40 w-4 -translate-x-1/2 cursor-col-resize" onPointerDown={startResize} aria-label={t("agent.panel.resize")} />
+                <button type="button" className="absolute inset-y-8 left-0 z-40 w-1.5 -translate-x-1/2 cursor-col-resize rounded-full bg-stone-400/20 hover:bg-stone-400/50" onPointerDown={startResize} aria-label={t("agent.panel.resize")} />
+                {floating ? <div className="absolute bottom-0 right-0 z-50 size-3 cursor-nwse-resize rounded-tl-md bg-stone-400/20 hover:bg-stone-400/50" onPointerDown={startHeightResize} title="调整窗口大小" /> : null}
                 <AcpAgentPanel floating={floating} onToggleFloating={toggleFloating} />
             </motion.aside>
         </motion.div>

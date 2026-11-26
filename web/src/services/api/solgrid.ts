@@ -15,6 +15,7 @@ export type SolgridRun = {
     error?: string | null;
     costSpark?: number | null;
     billingStatus?: string | null;
+    queuePosition?: number;
     outputs?: SolgridOutput[] | null;
 };
 

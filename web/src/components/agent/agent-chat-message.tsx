@@ -350,7 +350,7 @@ function commandViewState(detail: unknown) {
 }
 
 function AgentPlanCard({ title, plan, theme }: { title: string; plan: PlanDetail; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
-    const [open, setOpen] = useState(true);
+    const [open, setOpen] = useState(false);
     const completed = plan.tasks.filter((item) => item.status === "completed").length;
     const state = planCardState(plan, completed);
     return (

@@ -17,6 +17,9 @@ export type AgentTranscriptItem = {
     title?: string;
     kind?: string;
     status?: string;
+    startedAt?: string;
+    endedAt?: string;
+    updatedAt?: string;
 };
 
 export type AgentConversation = {
@@ -53,6 +56,11 @@ export async function listAgentConversations(projectId: string): Promise<AgentCo
 
 export async function createAgentConversation(projectId: string, title?: string): Promise<AgentConversation> {
     const data = await request<{ conversation: AgentConversation }>(`/projects/${projectId}/agent/conversations`, { method: "POST", body: JSON.stringify({ title }) });
+    return data.conversation;
+}
+
+export async function prepareAgentConversation(projectId: string, conversationId: string): Promise<AgentConversation> {
+    const data = await request<{ conversation: AgentConversation }>(`/projects/${projectId}/agent/conversations/${conversationId}/prepare`, { method: "POST" });
     return data.conversation;
 }
 

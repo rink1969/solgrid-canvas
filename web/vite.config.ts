@@ -62,7 +62,7 @@ export default defineConfig(({ mode }) => {
                 "/api": {
                     target: daemonTarget,
                     changeOrigin: false,
-                    headers: daemonToken ? { "x-canvas-token": daemonToken } : {},
+                    headers: { "x-canvas-client": "web", ...(daemonToken ? { "x-canvas-token": daemonToken } : {}) },
                 },
             },
         },

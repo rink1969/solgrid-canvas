@@ -130,6 +130,11 @@ function authorized(req) {
     return crypto.timingSafeEqual(Buffer.from(token), Buffer.from(TOKEN));
 }
 
+// 区分“浏览器/UI 请求”和“Agent/MCP 的 token 请求”：花费确认只允许前者直接触发。
+function isBrowserRequest(req) {
+    return Boolean(cookieValue(req, "canvas_token")) || req.headers["x-canvas-client"] === "web";
+}
+
 // 生产：daemon 直接托管构建后的前端（SPA fallback + 首次访问写鉴权 cookie）
 function serveStatic(req, res, pathname) {
     let relative = decodeURIComponent(pathname);
@@ -256,14 +261,25 @@ async function handle(req, res) {
     if (pathname === "/api/tools" && req.method === "GET") {
         const query = String(url.searchParams.get("q") || "").trim();
         if (!query) return sendJson(res, 400, { error: "missing_query" });
-        const key = `tools:q:${query}`;
+        const includeUnavailable = url.searchParams.get("include_unavailable") === "1";
+        const key = `tools:q:v2:${includeUnavailable ? "all:" : ""}${query}`;
         const cached = catalog.get(key, TOOLS_QUERY_TTL_MS);
         if (cached) return sendJson(res, 200, { results: cached, cached: true });
         try {
-            const data = await gateway.listTools({ query, limit: 20 });
+            const data = await gateway.listTools({ query, limit: 20, includeUnavailable });
             const results = (data.items || [])
                 .filter((item) => item?.provider && item?.endpoint)
-                .map((item) => ({ provider: item.provider, endpoint: item.endpoint, description: item.description, price: item.price, tags: item.tags || item.categories || [] }));
+                .map((item) => ({
+                    provider: item.provider,
+                    endpoint: item.endpoint,
+                    displayName: item.displayName,
+                    description: item.description,
+                    price: item.price,
+                    tags: item.tags || item.categories || [],
+                    categories: item.categories,
+                    invocationEnabled: item.invocationEnabled,
+                    unavailableReason: item.unavailableReason,
+                }));
             catalog.put(key, results);
             return sendJson(res, 200, { results, cached: false });
         } catch (error) {
@@ -420,7 +436,7 @@ async function handle(req, res) {
         return sendJson(res, 405, { error: "method_not_allowed" });
     }
 
-    const conversationAction = pathname.match(/^\/api\/projects\/([A-Za-z0-9_-]{1,64})\/agent\/conversations\/([A-Za-z0-9-]{1,64})\/(transcript|prompt|cancel|model)$/);
+    const conversationAction = pathname.match(/^\/api\/projects\/([A-Za-z0-9_-]{1,64})\/agent\/conversations\/([A-Za-z0-9-]{1,64})\/(transcript|prompt|cancel|model|prepare)$/);
     if (conversationAction) {
         const [projectId, conversationId, action] = [conversationAction[1], conversationAction[2], conversationAction[3]];
         if (!store.readProject(projectId)) return sendJson(res, 404, { error: "not_found" });
@@ -428,6 +444,13 @@ async function handle(req, res) {
 
         if (action === "transcript" && req.method === "GET") {
             return sendJson(res, 200, { transcript: agent.transcript(projectId, cwd, conversationId) });
+        }
+        if (action === "prepare" && req.method === "POST") {
+            try {
+                return sendJson(res, 200, { conversation: await agent.prepareConversation(projectId, cwd, conversationId) });
+            } catch (error) {
+                return sendJson(res, 502, { error: "agent_unavailable", message: error.message });
+            }
         }
         if (action === "prompt" && req.method === "POST") {
             let body;
@@ -441,6 +464,10 @@ async function handle(req, res) {
                 await agent.prompt(projectId, cwd, conversationId, String(body.text));
                 return sendJson(res, 200, { ok: true });
             } catch (error) {
+                if (error.code === "agent_busy") {
+                    res.setHeader("retry-after", "5");
+                    return sendJson(res, 409, { error: "agent_busy", message: error.message, retryAfterSeconds: 5 });
+                }
                 return sendJson(res, 400, { error: "agent_prompt_failed", message: error.message });
             }
         }
@@ -486,21 +513,29 @@ async function handle(req, res) {
             return sendJson(res, 400, { error: "invalid_json", message: error.message });
         }
         const { projectId, nodeId, provider, endpoint, prompt } = body || {};
-        if (!projectId || !provider || !endpoint) return sendJson(res, 400, { error: "missing_fields" });
-        const params = { ...(body.params || {}) };
-        // 兼容两种写法：prompt 放 params 内（画布自己用）或放请求体顶层（Agent/脚本常用）。
-        if (typeof params.prompt !== "string" || !params.prompt.trim()) {
-            if (typeof prompt === "string") params.prompt = prompt;
-        }
-        // 再回退到节点自己的提示词，避免“审批通过后才发现参数不全”。
-        if (typeof params.prompt !== "string" || !params.prompt.trim()) {
-            if (nodeId) {
-                const node = store.readProject(projectId)?.nodes?.find((item) => item.id === nodeId);
-                if (typeof node?.metadata?.prompt === "string") params.prompt = node.metadata.prompt;
+        if (!projectId) return sendJson(res, 400, { error: "missing_fields" });
+        const rawItems = Array.isArray(body?.items) && body.items.length ? body.items : [{ nodeId, provider, endpoint, params: body?.params || {}, prompt }];
+        const items = [];
+        for (const raw of rawItems) {
+            const jobNodeId = raw.nodeId || nodeId || null;
+            const jobProvider = raw.provider || provider;
+            const jobEndpoint = raw.endpoint || endpoint;
+            if (!jobProvider || !jobEndpoint) return sendJson(res, 400, { error: "missing_fields", message: "每个审批项都需要 provider/endpoint" });
+            const params = { ...(raw.params || {}) };
+            if (typeof params.prompt !== "string" || !params.prompt.trim()) {
+                if (typeof raw.prompt === "string") params.prompt = raw.prompt;
+                else if (typeof prompt === "string") params.prompt = prompt;
             }
+            if (typeof params.prompt !== "string" || !params.prompt.trim()) {
+                if (jobNodeId) {
+                    const node = store.readProject(projectId)?.nodes?.find((item) => item.id === jobNodeId);
+                    if (typeof node?.metadata?.prompt === "string") params.prompt = node.metadata.prompt;
+                }
+            }
+            items.push({ nodeId: jobNodeId, provider: jobProvider, endpoint: jobEndpoint, params });
         }
-        const approval = approvals.create({ projectId, nodeId: nodeId || null, provider, endpoint, params });
-        return sendJson(res, 200, { id: approval.id, status: approval.status, run: approval.run || null });
+        const approval = approvals.create({ projectId, items });
+        return sendJson(res, 200, { id: approval.id, status: approval.status, items: approval.items, run: approval.run || null, runs: approval.runs || [], runIds: (approval.runs || []).map((run) => run.id) });
     }
 
     if (pathname === "/api/approvals" && req.method === "GET") {
@@ -513,11 +548,12 @@ async function handle(req, res) {
     if (approvalMatch && req.method === "GET") {
         const item = approvals.get(approvalMatch[1]);
         if (!item) return sendJson(res, 404, { error: "not_found" });
-        return sendJson(res, 200, { id: item.id, status: item.status, run: item.run || null });
+        return sendJson(res, 200, { id: item.id, status: item.status, items: item.items || [], run: item.run || null, runs: item.runs || [], runIds: (item.runs || []).map((run) => run.id) });
     }
 
     const decisionMatch = pathname.match(/^\/api\/approvals\/([0-9a-f-]{36})\/decision$/);
     if (decisionMatch && req.method === "POST") {
+        if (!isBrowserRequest(req)) return sendJson(res, 403, { error: "confirmation_required", message: "审批必须由画布 UI 确认" });
         let body;
         try {
             body = JSON.parse(await readBody(req));
@@ -526,7 +562,7 @@ async function handle(req, res) {
         }
         const decided = approvals.decide(decisionMatch[1], Boolean(body?.allow));
         if (!decided) return sendJson(res, 404, { error: "not_found_or_decided" });
-        return sendJson(res, 200, { id: decided.id, status: decided.status, run: decided.run || null });
+        return sendJson(res, 200, { id: decided.id, status: decided.status, run: decided.run || null, runs: decided.runs || [], runIds: (decided.runs || []).map((run) => run.id) });
     }
 
     // ---- run 队列 ----
@@ -536,12 +572,13 @@ async function handle(req, res) {
         const runs = runStore.list(projectId || null, limit).map((run) => {
             // 列表不带 body（可能很大），详情单独取
             const { body, builtBody, idempotencyKey, ...summary } = run;
-            return { ...summary, hasBuiltBody: Boolean(builtBody) };
+            return { ...summary, hasBuiltBody: Boolean(builtBody), queuePosition: run.status === "queued" ? runStore.queuePosition(run.id) : 0 };
         });
         return sendJson(res, 200, { runs });
     }
 
     if (pathname === "/api/runs" && req.method === "POST") {
+        if (!isBrowserRequest(req)) return sendJson(res, 403, { error: "confirmation_required", message: "Agent/MCP 发起生成必须走 /api/approvals，由用户在画布上确认；不能直接调用 /api/runs" });
         let body;
         try {
             body = JSON.parse(await readBody(req));
@@ -564,7 +601,7 @@ async function handle(req, res) {
     if (runMatch && req.method === "GET") {
         const run = runStore.get(runMatch[1]);
         if (!run) return sendJson(res, 404, { error: "not_found" });
-        return sendJson(res, 200, { run });
+        return sendJson(res, 200, { run: { ...run, queuePosition: run.status === "queued" ? runStore.queuePosition(run.id) : 0 } });
     }
     if (runMatch && req.method === "DELETE") {
         return sendJson(res, 200, { ok: runStore.remove(runMatch[1]) });
@@ -572,6 +609,7 @@ async function handle(req, res) {
 
     const retryMatch = pathname.match(/^\/api\/runs\/([0-9a-f-]{36})\/retry$/);
     if (retryMatch && req.method === "POST") {
+        if (!isBrowserRequest(req)) return sendJson(res, 403, { error: "confirmation_required", message: "重试生成必须在画布 UI 确认" });
         const source = runStore.get(retryMatch[1]);
         if (!source) return sendJson(res, 404, { error: "not_found" });
         const run = engine.enqueue({ projectId: source.projectId, nodeId: source.nodeId, provider: source.provider, endpoint: source.endpoint, body: source.body });

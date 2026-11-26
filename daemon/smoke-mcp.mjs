@@ -204,10 +204,11 @@ try {
     const sensitive = await call("canvas_import_local", { projectId: "mcpproj", paths: [path.join(os.homedir(), ".dsh", ".credentials.yaml")] });
     check("敏感目录被拒绝", sensitive.isError, JSON.stringify(sensitive.data).slice(0, 200));
 
-    const run = await call("canvas_run_nodes", { projectId: "mcpproj", nodeId: "anchor", approvalTimeoutSeconds: 20 });
-    check("run_nodes 经审批后返回 runId", !run.isError && typeof run.data?.runId === "string", JSON.stringify(run.data).slice(0, 300));
-    if (run.data?.runId) {
-        const watched = await call("canvas_watch_run", { runId: run.data.runId, timeoutSeconds: 30 });
+    const run = await call("canvas_run_nodes", { projectId: "mcpproj", nodeId: "anchor" });
+    check("run_nodes 返回 approvalId / runIds", !run.isError && (typeof run.data?.approvalId === "string" || typeof run.data?.runs?.[0]?.runId === "string"), JSON.stringify(run.data).slice(0, 300));
+    const runId = run.data?.runs?.[0]?.runId;
+    if (runId) {
+        const watched = await call("canvas_watch_run", { runId, timeoutSeconds: 30 });
         check("watch_run 拿到产物", !watched.isError && watched.data.status === "completed" && watched.data.outputs?.length === 1, JSON.stringify(watched.data).slice(0, 300));
     }
 } catch (error) {

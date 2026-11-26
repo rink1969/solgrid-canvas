@@ -29,10 +29,45 @@ function defaultHeight(kind, item) {
  * @param {{anchor: {position:{x:number,y:number}, width:number, height:number}, items: Array<{kind:string, role?:string, width?:number, height?:number, text?:string}>, nodes: Array<{id:string, position:{x:number,y:number}, width:number, height:number}>}} input
  * @returns {Array<{index:number, x:number, y:number, width:number, height:number}>}
  */
-export function layoutArtifacts({ anchor, items, nodes = [] }) {
+export function layoutArtifacts({ anchor, items, nodes = [], layout = "auto", gap = ROW_GAP }) {
     const columns = new Map();
     const placements = [];
     const occupied = nodes.map((node) => ({ x: node.position.x, y: node.position.y, width: node.width, height: node.height }));
+    const itemBox = (item) => {
+        const kind = COLUMNS[item.kind] ? item.kind : "text";
+        const column = COLUMNS[kind];
+        let width = item.width ? Math.max(120, Math.round(item.width)) : column.width;
+        if (width > 640) width = 640;
+        return { kind, width, height: defaultHeight(kind, item) };
+    };
+    const placeMode = (mode) => {
+        const startX = anchor.position.x + anchor.width + ANCHOR_GAP;
+        let cursorX = startX;
+        let cursorY = anchor.position.y;
+        let rowHeight = 0;
+        const columnsCount = mode === "grid" ? 3 : 1;
+        items.forEach((item, index) => {
+            const box = itemBox(item);
+            if (mode === "row") {
+                placements.push({ index, x: cursorX, y: cursorY, width: box.width, height: box.height });
+                cursorX += box.width + gap;
+                return;
+            }
+            if (mode === "grid") {
+                const column = index % columnsCount;
+                const row = Math.floor(index / columnsCount);
+                const x = startX + column * (box.width + gap);
+                const y = anchor.position.y + row * (box.height + gap);
+                placements.push({ index, x, y, width: box.width, height: box.height });
+                return;
+            }
+            // column
+            placements.push({ index, x: cursorX, y: cursorY, width: box.width, height: box.height });
+            cursorY += box.height + gap;
+        });
+        return placements;
+    };
+    if (layout === "row" || layout === "column" || layout === "grid") return placeMode(layout);
 
     const baseY = anchor.position.y;
     let columnX = anchor.position.x + anchor.width + ANCHOR_GAP;
