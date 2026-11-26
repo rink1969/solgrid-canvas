@@ -2,6 +2,8 @@
 
 ## Unreleased
 
++ [修复] 节点模型下拉改用平台 catalog 分类数据，不再用 `tools list -q "image generation"` 文本搜索导致「暂无数据」。
+
 + [调整] 适配 solgrid CLI 0.7：工具搜索与模型目录改用 `solgrid tools list` / `tools categories`，不再依赖 `discover -q`。
 
 ## 0.1.4 - 2026-11-25

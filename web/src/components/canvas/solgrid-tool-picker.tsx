@@ -1,38 +1,25 @@
 import { useEffect, useState } from "react";
 import { Select } from "antd";
 
-import { listTools, type SolgridTool } from "@/services/api/solgrid";
+import { listCatalog, type SolgridTool } from "@/services/api/solgrid";
 import { useConfigStore } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
 
-// tools 结果缓存到模块级：节点面板频繁挂载时不重复拉起 CLI
-const cache = new Map<string, Promise<SolgridTool[]>>();
-
-const QUERY: Record<"image" | "video" | "audio", string> = {
-    image: "image generation",
-    video: "video generation",
-    audio: "text to speech audio",
-};
-
-function matches(mode: "image" | "video" | "audio", endpoint: string) {
-    if (mode === "video") return endpoint.includes("/video/") || endpoint.includes("image-to-video");
-    if (mode === "image") return endpoint.includes("/image/");
-    return /audio|text-to-speech|t2a|speech|music|sound/i.test(endpoint);
-}
+// catalog 结果缓存到模块级：节点面板频繁挂载时不重复拉起 CLI
+const cache = new Map<"image" | "video" | "audio", Promise<SolgridTool[]>>();
 
 function loadTools(mode: "image" | "video" | "audio") {
-    const query = QUERY[mode];
-    const cached = cache.get(query);
+    const cached = cache.get(mode);
     if (cached) return cached;
-    const promise = listTools(query)
-        .then((items) => items.filter((item) => matches(mode, item.endpoint)))
+    const promise = listCatalog()
+        .then((catalog) => catalog[mode] || [])
         .catch((error) => {
-            cache.delete(query);
+            cache.delete(mode);
             throw error;
         });
-    cache.set(query, promise);
+    cache.set(mode, promise);
     return promise;
 }
 
