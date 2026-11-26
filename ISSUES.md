@@ -54,7 +54,7 @@
 | D23 | `update_meta/viewport` 无文档、无回读 | 完成 | MCP 描述 + `get_state` 返回 viewport |
 | D24 | 新对话没有模型选择器 | 完成 | `prepareConversation` + 前端 prepare；`smoke-agent` 已验证 prepare 返回 configOptions |
 
-### 部分完成 / 待处理
+### 已完成 / 不适用
 
 | ID | 问题 | 状态 | 剩余 |
 |---|---|---|---|
@@ -122,4 +122,4 @@
 - `node daemon/smoke-mcp.mjs`：通过
 - `node daemon/smoke-agent.mjs`：通过
 - 真实图片 / 视频 / 浏览器 E2E：通过
-- 待补：无（D5/D17/S01 已标注不适用）
+- 待补：无。A1–A7、D1–D24（D5/D17/S01 不适用）、E1–E4 均已关闭。
