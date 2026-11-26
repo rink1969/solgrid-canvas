@@ -1,49 +1,30 @@
-# solgrid-canvas v0.2.0
+# solgrid-canvas v0.2.1
 
-面向 solgrid 平台的本地无限画布：节点式生成图片、视频、音频，支持本地 Agent 通过 MCP 操作画布、通过 ACP 在画布内对话。
+0.2.0 之后的一轮修复与清理：Agent 会话生命周期、dev 模式连接，以及仓库瘦身。
 
-## 0.2.0 更新
+## 修复
 
-### Agent 工作流
+- **删除项目不再 500**：ACP 的 `session/close` 改用 request 发送并按协议等回执（之前发的是 notification，对端直接忽略），关闭会话后 Agent 侧的 MCP 子进程才会退出；删除项目前会先关闭该项目的所有会话。
+- 项目目录仍被占用时返回 `409 project_busy` 并提示，而不是 `500 EPERM`。
+- **Agent 进程退出可自愈**：进程退出后连接立即作废、挂起请求直接失败；下一次请求自动重新拉起 Agent，不再每个请求都卡满 120s 超时。
 
-- `canvas_run_nodes` 改为异步批量：立即返回 `approvalId`，不再同步阻塞导致 MCP 超时；`nodeIds` 真正批量。
-- 新增 `canvas_get_approval` / `canvas_wait_approval`；审批通过后返回 `runs` / `runIds`。
-- 审批弹窗增加轮询兜底、待审批队列数量、批量节点数量。
-- 审批状态持久化到 `~/.solgrid-canvas/approvals.json`，daemon 重启后可恢复 pending / expired。
-- 偏好设置新增「允许 Agent 自动发起生成」；默认仍逐次人工确认，费用上限由 solgrid 平台控制。
-- 审批支持服务端成本估算与 `maxCostSpark`，单次审批最多 50 个节点。
-- ACP 权限增加查询接口与前端轮询，决策只允许画布 UI。
-- ACP 会话创建 single-flight；transcript 在 done/error 时立即落盘。
+## 开发体验
 
-### 画布数据与安全
+- dev 模式的 Vite 代理按请求现读 `~/.solgrid-canvas/daemon.json` 的 token。daemon 重启换 token 后，不再需要手动同步 `web/.env.local`（该文件只作兜底）。
 
-- 全量 PUT 与 ops 共用 `validateProjectPayload`：节点/连线/几何/metadata 校验；已有画布 PUT 必须带 `expectRev`。
-- 节点几何支持顶层 x/y，统一归一化为数字；非法值直接报错。
-- `add_edge` 校验端点存在、禁止自连；节点 id 不允许重复/修改。
-- `/api/runs`、retry、审批决策只接受画布 UI 请求，普通 MCP token 不能绕过。
-- MCP `canvas_apply_ops` / `canvas_place_artifacts` schema 改为 `oneOf`。
-- 资产上传拒绝 AVIF/SVG；新增孤儿资产 GC 端点 `POST /api/projects/:id/assets/gc`（默认 7 天保护）。
-- 平台 cost 对象 `{value,currency}` 正确回读为 `costSpark`。
+## 仓库清理
 
-### UI
-
-- 配置节点生成后显示产物预览。
-- 视频节点支持「查看视频」与侧栏预览。
-- 浮动 Agent 面板支持高度调整，小把手替代整行拖动条。
-- 新对话预启动 ACP 会话，首轮发送前可选模型。
-- 思考/工具调用折叠为「过程」，显示总耗时与单条耗时。
-- Agent 运行期间输入框可编辑；并发 prompt 返回 409 + Retry-After。
-- 运行历史显示排队位次；运行详情按额度/登录/超时/不可用/参数给出降级提示。
+- 移除 GitHub Pages 与官方插件发布 workflow：本产品是本地 daemon + 浏览器，静态 Pages 无法工作；`plugins-dist` 分支产物没有任何消费者。
+- 移除上游文档站 `docs/`（38 篇上游文档 + 独立 Next.js 站点）及 `.dockerignore` 中的相关条目。
+- 删除远端 `plugins-dist` 分支；`upstream` remote 保留作参考。
 
 ## 升级说明
 
 - daemon：重启 `npm start` / `npm run daemon`。
-- Web：使用本包内 `web/dist` 或重新 `npm run build`，刷新页面。
-- 已有画布通过 API 全量覆盖时现在必须带 `expectRev`；正常画布 UI 增量保存不受影响。
-- 默认仍需要人工审批；要允许 Agent 自动生成，请到「设置 → 偏好设置」显式开启。
+- Web：刷新页面即可；dev 模式无需再改 `.env.local`。
 
 ## 验证
 
-- `tsc --noEmit` 通过。
-- `smoke.mjs` / `smoke-runs.mjs` / `smoke-mcp.mjs` / `smoke-agent.mjs` 通过。
-- 真实图片、视频生成；浏览器审批弹窗、设置开关、浮动面板；daemon 重启审批恢复；并发 catalog 冷启动均通过。
+- 新建项目 → 建对话 → prepare（deepseek-flash）→ 直接 DELETE：返回 200，目录已删除，会话清零。
+- ACP 子进程退出后再次 prepare：45ms 完成（修复前会等满 120s）。
+- 把 `.env.local` 的 token 改成错误值后，`/api/agent/status` 仍返回 200。
