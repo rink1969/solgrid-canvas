@@ -520,7 +520,7 @@ DSH 的 ACP 能力（读自安装包内 `@deepseek-ai/dsh-acp/README`）：标�
 
 ## 6. 技术栈与仓库结构
 
-**栈**：Node ≥22（对齐 solgrid-cli 要求，本机 v24）· TypeScript · pnpm workspace · 前端沿用上游（Vite + React 19 + antd 6 + Tailwind 4 + Zustand + localforage）· daemon：Hono（轻、SSE 友好）+ better-sqlite3（WAL）· MCP：`@modelcontextprotocol/sdk` + zod · 媒体：ffmpeg（可选，本机已有 9.0.2）· 测试：vitest + 假网关（录制 fixtures）。
+**栈**：Node ≥22（solgrid CLI ≥0.7，对齐 tools 子命令；本机 v24）· TypeScript · pnpm workspace · 前端沿用上游（Vite + React 19 + antd 6 + Tailwind 4 + Zustand + localforage）· daemon：Hono（轻、SSE 友好）+ better-sqlite3（WAL）· MCP：`@modelcontextprotocol/sdk` + zod · 媒体：ffmpeg（可选，本机已有 9.0.2）· 测试：vitest + 假网关（录制 fixtures）。
 
 ```
 solgrid-canvas/            # = 上游 v0.20.0 基线 + 我们的增量

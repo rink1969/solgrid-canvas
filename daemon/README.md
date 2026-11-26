@@ -4,6 +4,8 @@
 
 零运行时依赖：只用 Node 内置模块（`http` / `fs` / `crypto`），**不需要 npm install**。
 
+前置：Node ≥ 22、solgrid CLI ≥ 0.7（需要 `tools` 子命令）。
+
 ## 运行
 
 ```bash

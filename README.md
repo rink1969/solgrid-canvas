@@ -41,7 +41,7 @@ npm start
 # 打开 http://127.0.0.1:17371
 ```
 
-`npm start` 会启动 daemon 并直接托管构建后的前端；首次访问自动下发鉴权 cookie。要求本机有 `solgrid` CLI 并已登录；视频片段重生成还需要 `ffmpeg`/`ffprobe`。
+`npm start` 会启动 daemon 并直接托管构建后的前端；首次访问自动下发鉴权 cookie。要求本机有 `solgrid` CLI ≥ 0.7 并已登录；视频片段重生成还需要 `ffmpeg`/`ffprobe`。
 
 ### 让 Agent 帮你装
 

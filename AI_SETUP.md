@@ -35,7 +35,9 @@
 | npm | `npm -v` | 随 Node 安装 |
 | git | `git --version` | 任意版本 |
 | ffmpeg / ffprobe | `ffmpeg -version`、`ffprobe -version` | 视频片段重生成需要 |
-| solgrid CLI | `solgrid --version` | ≥ 0.4，且已登录 |
+| solgrid CLI | `solgrid --version` | ≥ 0.7（需要 `tools` 子命令），且已登录 |
+
+> 画布固定使用 solgrid CLI 0.7+ 的 `tools list` / `tools categories` 读取模型目录；0.6 及以下不兼容，请先执行 `npm i -g @solgridai/cli@latest`。
 
 安装参考：
 

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
++ [文档] 标注 solgrid CLI 最低版本 0.7（需要 tools 子命令）。
 + [修复] catalog 对同时属于 video/image 的工具按 bucket 分别去重，magic-hour 等不再从生图列表消失。
 + [优化] `/api/tools`、`/api/tools/catalog`、`/api/tools/detail` 改为缓存优先（搜索/目录 24h、详情 7d），不再每次请求都调用 solgrid CLI。
 
