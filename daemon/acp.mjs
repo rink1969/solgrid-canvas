@@ -94,7 +94,7 @@ function mcpEntry(projectId, conversationId) {
     };
 }
 
-function createConnection({ adapter, onNotification, onRequest, log }) {
+function createConnection({ adapter, onNotification, onRequest, onExit, log }) {
     const child = spawn(adapter.command, adapter.args, { env: { ...process.env, ...adapter.env }, stdio: ["pipe", "pipe", "pipe"], shell: adapter.shell === true });
     let buffer = "";
     let nextId = 1;
@@ -136,7 +136,17 @@ function createConnection({ adapter, onNotification, onRequest, log }) {
         const text = String(chunk);
         if (!/ExperimentalWarning|Debugging|model listing/i.test(text)) log(`[acp] ${text.slice(0, 300).trim()}`);
     });
-    child.on("exit", (code) => log(`[acp] 进程退出（code=${code}）`));
+    child.on("exit", (code) => {
+        log(`[acp] 进程退出（code=${code}）`);
+        // 进程没了，挂起的请求不会再回来；立刻失败，避免每个请求都等满超时。
+        for (const [id, { reject, timer }] of pending) {
+            clearTimeout(timer);
+            pending.delete(id);
+            reject(new Error("ACP Agent 进程已退出，请重试"));
+        }
+        incoming.clear();
+        onExit?.(code);
+    });
 
     function request(method, params, timeoutMs = 120000) {
         const id = nextId++;
@@ -272,18 +282,13 @@ export function createAgentManager({ broadcast, log }) {
                 emit(projectId, conversationId, { kind: "conversation", action: "renamed" });
                 return summary(projectId, conversation);
             },
-            deleteConversation(projectId, cwd, conversationId) {
+            async deleteConversation(projectId, cwd, conversationId) {
                 const entry = loadProject(projectId, cwd);
                 const index = entry.conversations.findIndex((item) => item.id === conversationId);
                 if (index < 0) return false;
                 const [conversation] = entry.conversations.splice(index, 1);
-                const key = runtimeKey(projectId, conversationId);
-                const runtime = runtimes.get(key);
-                if (runtime) {
-                    if (connection) connection.notify("session/close", { sessionId: runtime.sessionId });
-                    bySession.delete(runtime.sessionId);
-                    runtimes.delete(key);
-                }
+                const runtime = runtimes.get(runtimeKey(projectId, conversationId));
+                if (runtime) await closeSession(runtime);
                 try {
                     fs.rmSync(transcriptPath(cwd, conversation.id), { force: true });
                 } catch {
@@ -293,16 +298,10 @@ export function createAgentManager({ broadcast, log }) {
                 emit(projectId, conversationId, { kind: "conversation", action: "deleted" });
                 return true;
             },
-            closeProject(projectId) {
-                let closed = 0;
-                for (const [key, runtime] of [...runtimes.entries()]) {
-                    if (!key.startsWith(`${projectId}/`)) continue;
-                    if (connection) connection.notify("session/close", { sessionId: runtime.sessionId });
-                    bySession.delete(runtime.sessionId);
-                    runtimes.delete(key);
-                    closed += 1;
-                }
-                return closed;
+            async closeProject(projectId) {
+                const targets = [...runtimes.values()].filter((runtime) => runtime.projectId === projectId);
+                await Promise.allSettled(targets.map((runtime) => closeSession(runtime)));
+                return targets.length;
             },
             transcript(projectId, cwd, conversationId) {
                 const runtime = runtimes.get(runtimeKey(projectId, conversationId));
@@ -463,6 +462,19 @@ export function createAgentManager({ broadcast, log }) {
         return `${projectId}/${conversationId}`;
     }
 
+    // session/close 在 ACP 里是 request（要回执），notify 会被对端忽略：
+    // 会话不关，Agent 侧的 MCP 子进程（cwd=项目目录）就一直在，Windows 下项目目录删不掉。
+    async function closeSession(runtime) {
+        bySession.delete(runtime.sessionId);
+        runtimes.delete(runtimeKey(runtime.projectId, runtime.conversationId));
+        if (!connection) return;
+        try {
+            await connection.request("session/close", { sessionId: runtime.sessionId }, 15000);
+        } catch (error) {
+            log(`[acp] 关闭会话失败（${runtime.sessionId}）：${error.message}`);
+        }
+    }
+
     function loadProject(projectId, cwd) {
         const existing = projects.get(projectId);
         if (existing) {
@@ -588,16 +600,26 @@ export function createAgentManager({ broadcast, log }) {
         if (!adapter) throw new Error("没有可用的 ACP Agent：未找到 DSH 桌面版，也没有配置 CANVAS_ACP_COMMAND");
         if (initializing) return initializing;
         initializing = (async () => {
-            connection = createConnection({
+            const conn = createConnection({
                 adapter,
                 onNotification: handleNotification,
                 onRequest: (message) => {
                     if (message.method === "session/request_permission") handleNotification(message);
                 },
+                // Agent 进程意外退出后作废这条连接，下次请求重新拉起；否则所有调用都会写到死管道上。
+                onExit: () => {
+                    if (connection === conn) connection = null;
+                },
                 log,
             });
-            await connection.request("initialize", { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: "solgrid-canvas", version: "0.2.0" } });
-            return connection;
+            connection = conn;
+            try {
+                await conn.request("initialize", { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: "solgrid-canvas", version: "0.2.0" } });
+            } catch (error) {
+                if (connection === conn) connection = null;
+                throw error;
+            }
+            return conn;
         })().finally(() => {
             initializing = null;
         });

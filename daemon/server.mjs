@@ -427,7 +427,7 @@ async function handle(req, res) {
 
     const closeAgentProject = pathname.match(/^\/api\/projects\/([A-Za-z0-9_-]{1,64})\/agent\/close$/);
     if (closeAgentProject && req.method === "POST") {
-        return sendJson(res, 200, { closed: agent.closeProject(closeAgentProject[1]) });
+        return sendJson(res, 200, { closed: await agent.closeProject(closeAgentProject[1]) });
     }
 
     const conversationProject = pathname.match(/^\/api\/projects\/([A-Za-z0-9_-]{1,64})\/agent\/conversations$/);
@@ -453,7 +453,7 @@ async function handle(req, res) {
         const [projectId, conversationId] = [conversationItem[1], conversationItem[2]];
         if (!store.readProject(projectId)) return sendJson(res, 404, { error: "not_found" });
         const cwd = path.join(store.projectsDir, projectId);
-        if (req.method === "DELETE") return sendJson(res, 200, { ok: agent.deleteConversation(projectId, cwd, conversationId) });
+        if (req.method === "DELETE") return sendJson(res, 200, { ok: await agent.deleteConversation(projectId, cwd, conversationId) });
         if (req.method === "PATCH") {
             let body;
             try {
@@ -794,8 +794,17 @@ async function handle(req, res) {
             return sendJson(res, 200, { rev: saved.rev, dir: saved.dir });
         }
         if (req.method === "DELETE") {
-            const removed = store.deleteProject(id);
-            if (!removed) return sendJson(res, 404, { error: "not_found" });
+            if (!store.readProject(id)) return sendJson(res, 404, { error: "not_found" });
+            // 先关掉该项目下的 Agent 会话：会话里的 MCP 子进程以项目目录为 cwd，不退出就删不掉目录。
+            await agent.closeProject(id);
+            try {
+                store.deleteProject(id);
+            } catch (error) {
+                if (error.code === "EPERM" || error.code === "EBUSY") {
+                    return sendJson(res, 409, { error: "project_busy", message: "项目目录仍被占用（Agent 会话或文件锁），稍后重试" });
+                }
+                throw error;
+            }
             const clientId = String(req.headers["x-canvas-client"] || url.searchParams.get("client") || "");
             broadcast({ type: "project.deleted", id, clientId });
             return sendJson(res, 200, { ok: true });

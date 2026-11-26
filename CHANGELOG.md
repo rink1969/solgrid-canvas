@@ -2,6 +2,11 @@
 
 ## Unreleased
 
++ [修复] 关闭 Agent 会话改用 ACP `session/close` 请求（原先是通知，对端忽略），删项目时 Agent 侧 MCP 子进程不退出、Windows 下目录被锁导致删除 500。
++ [修复] 删除项目前先关闭该项目的 Agent 会话；目录仍被占用时返回 409 并提示，而不是 500。
++ [修复] ACP Agent 进程退出后作废连接并让挂起请求立即失败，不再每个请求卡满 120s 超时。
++ [调整] dev 模式的 Vite 代理按请求现读 `~/.solgrid-canvas/daemon.json` 的 token，daemon 换 token 后不再需要同步 `.env.local`。
+
 ## 0.2.0 - 2026-11-26
 
 + [修复] run 完成后回填画布失败会进入 SQLite `doc_ops` 队列，5 秒后重试，daemon 重启后继续补偿；超过 20 次停止重试并保留原始 ops。

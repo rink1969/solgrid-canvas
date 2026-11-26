@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv, type Plugin } from "vite";
@@ -38,12 +39,22 @@ function localPluginsManifest(): Plugin {
     };
 }
 
+// daemon 每次重启可能换 token（daemon.json 被删后重建）；dev 代理按请求现读，避免 .env.local 过期。
+function readDaemonToken() {
+    const root = process.env.CANVAS_HOME || join(homedir(), ".solgrid-canvas");
+    try {
+        return String(JSON.parse(readFileSync(join(root, "daemon.json"), "utf8")).token || "");
+    } catch {
+        return "";
+    }
+}
+
 export default defineConfig(({ mode }) => {
     // .env.local 里的 CANVAS_TOKEN / CANVAS_DAEMON_URL 只在 dev server 侧使用，
     // 不注入浏览器 bundle：代理负责带上 x-canvas-token。
     const env = loadEnv(mode, webDir, "");
     const daemonTarget = env.CANVAS_DAEMON_URL || "http://127.0.0.1:17371";
-    const daemonToken = env.CANVAS_TOKEN || "";
+    const envToken = env.CANVAS_TOKEN || "";
 
     return {
         base: process.env.VITE_BASE || "/",
@@ -62,7 +73,13 @@ export default defineConfig(({ mode }) => {
                 "/api": {
                     target: daemonTarget,
                     changeOrigin: false,
-                    headers: { "x-canvas-client": "web", ...(daemonToken ? { "x-canvas-token": daemonToken } : {}) },
+                    configure(proxy) {
+                        proxy.on("proxyReq", (proxyReq) => {
+                            proxyReq.setHeader("x-canvas-client", "web");
+                            const token = readDaemonToken() || envToken;
+                            if (token) proxyReq.setHeader("x-canvas-token", token);
+                        });
+                    },
                 },
             },
         },
