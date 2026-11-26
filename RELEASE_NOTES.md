@@ -1,30 +1,18 @@
-# solgrid-canvas v0.2.1
+# solgrid-canvas v0.2.2
 
-0.2.0 之后的一轮修复与清理：Agent 会话生命周期、dev 模式连接，以及仓库瘦身。
+两处修复：多图生成的附加节点，以及 Agent 输入框的中文输入法提示。
 
 ## 修复
 
-- **删除项目不再 500**：ACP 的 `session/close` 改用 request 发送并按协议等回执（之前发的是 notification，对端直接忽略），关闭会话后 Agent 侧的 MCP 子进程才会退出；删除项目前会先关闭该项目的所有会话。
-- 项目目录仍被占用时返回 `409 project_busy` 并提示，而不是 `500 EPERM`。
-- **Agent 进程退出可自愈**：进程退出后连接立即作废、挂起请求直接失败；下一次请求自动重新拉起 Agent，不再每个请求都卡满 120s 超时。
-
-## 开发体验
-
-- dev 模式的 Vite 代理按请求现读 `~/.solgrid-canvas/daemon.json` 的 token。daemon 重启换 token 后，不再需要手动同步 `web/.env.local`（该文件只作兜底）。
-
-## 仓库清理
-
-- 移除 GitHub Pages 与官方插件发布 workflow：本产品是本地 daemon + 浏览器，静态 Pages 无法工作；`plugins-dist` 分支产物没有任何消费者。
-- 移除上游文档站 `docs/`（38 篇上游文档 + 独立 Next.js 站点）及 `.dockerignore` 中的相关条目。
-- 删除远端 `plugins-dist` 分支；`upstream` remote 保留作参考。
-
-## 升级说明
-
-- daemon：重启 `npm start` / `npm run daemon`。
-- Web：刷新页面即可；dev 模式无需再改 `.env.local`。
+- **多产物节点的展示与参数**：一次生成 N 张时，除第一张外的附加节点原来只写 `naturalWidth/Height`，没有 `size`，宽高也固定成 480×320。现在按产物真实宽高比建节点，并带上 `size` / `count: 1` / `generationMode`，节点面板不再显示默认 1:1，和 assets 里的实际分辨率一致。
+- **附加节点标题**：复用原节点标题并加序号后缀（`标题 -1`、`标题 -2`），不再用 prompt 前 24 字。
+- **Agent 输入框中文输入法**：组词期间（IME 候选浮层出现时）隐藏默认提示文案，避免提示与候选字重叠；取消组词且输入框为空时提示恢复。
 
 ## 验证
 
-- 新建项目 → 建对话 → prepare（deepseek-flash）→ 直接 DELETE：返回 200，目录已删除，会话清零。
-- ACP 子进程退出后再次 prepare：45ms 完成（修复前会等满 120s）。
-- 把 `.env.local` 的 token 改成错误值后，`/api/agent/status` 仍返回 200。
+- `smoke-runs.mjs` 全部通过，新增断言覆盖：附加节点带 `size`/`count`、宽高比与产物一致、标题为 `原标题 -1`/`原标题 -2`。
+
+## 升级说明
+
+- daemon：重启 `npm start` / `npm run daemon`（多产物节点的逻辑在 daemon 侧）。
+- Web：刷新页面即可。已生成的旧附加节点不会自动修正，需要时手动处理。

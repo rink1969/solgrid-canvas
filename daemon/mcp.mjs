@@ -592,7 +592,7 @@ async function handle(message) {
         reply(id, {
             protocolVersion: params?.protocolVersion || "2024-11-05",
             capabilities: { tools: { listChanged: false } },
-            serverInfo: { name: "solgrid-canvas", version: "0.2.1" },
+            serverInfo: { name: "solgrid-canvas", version: "0.2.2" },
         });
         return;
     }
