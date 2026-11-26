@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pickCost } from "./gateway.mjs";
 
 const here = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 const PORT = 17398;
@@ -110,6 +111,7 @@ try {
     }
     check("run 完成", run?.status === "completed", JSON.stringify(run).slice(0, 300));
     check("记账 cost", run?.costSpark === 3.9 && run?.billingStatus === "SETTLED");
+    check("兼容平台对象形态 cost", pickCost({ cost: { value: "26", currency: "Spark" }, billingStatus: "SETTLED" }).cost === 26);
     check("产物已落地", Array.isArray(run?.outputs) && run.outputs.length === 1 && run.outputs[0].storageKey.startsWith("asset:smokeproj/"), JSON.stringify(run?.outputs));
     const outputFile = path.join(HOME, "projects", "smokeproj", "assets", run.outputs[0].file);
     check("产物文件存在", fs.existsSync(outputFile), outputFile);

@@ -226,10 +226,25 @@ export function pickOutputs(raw) {
     return items;
 }
 
+function numberFromCost(input) {
+    if (typeof input === "number" && Number.isFinite(input)) return input;
+    if (typeof input === "string" && input.trim()) {
+        const parsed = Number(input);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+    if (input && typeof input === "object") {
+        return numberFromCost(input.value ?? input.amount ?? input.spark ?? input.cost);
+    }
+    return null;
+}
+
 export function pickCost(raw) {
     const value = unwrap(raw);
-    const cost = typeof value.cost === "number" ? value.cost : typeof value.run?.cost === "number" ? value.run.cost : null;
-    return { cost, billingStatus: value.billingStatus || value.run?.billingStatus || "" };
+    const cost = numberFromCost(value.cost) ?? numberFromCost(value.run?.cost) ?? numberFromCost(value.costSpark) ?? numberFromCost(value.run?.costSpark);
+    return {
+        cost,
+        billingStatus: value.billingStatus || value.run?.billingStatus || value.billing?.status || value.run?.billing?.status || "",
+    };
 }
 
 export function tempBodyPath(dir, key) {
