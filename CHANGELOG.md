@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0 - 2026-11-26
+
 + [修复] run 完成后回填画布失败会进入 SQLite `doc_ops` 队列，5 秒后重试，daemon 重启后继续补偿；超过 20 次停止重试并保留原始 ops。
 + [优化] catalog 首次冷启动增加 in-flight 合并，多个页面同时打开只跑一次 `tools categories/list`；`tools:q:v2` 查询缓存超过 24h 自动清理。
 + [新增] `POST /api/projects/:id/assets/gc`：按画布/聊天/timeline 引用和 7 天保护清理孤儿资产。

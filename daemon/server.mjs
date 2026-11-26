@@ -18,7 +18,7 @@ import { estimateSpark, findCatalogPrice } from "./cost.mjs";
 import { createGateway } from "./gateway.mjs";
 import { createRunEngine } from "./runs.mjs";
 
-const VERSION = "0.1.4";
+const VERSION = "0.2.0";
 const CATALOG_TTL_MS = 24 * 60 * 60 * 1000;
 const TOOLS_QUERY_TTL_MS = 24 * 60 * 60 * 1000;
 const TOOL_DETAIL_TTL_MS = 7 * 24 * 60 * 60 * 1000;

@@ -596,7 +596,7 @@ export function createAgentManager({ broadcast, log }) {
                 },
                 log,
             });
-            await connection.request("initialize", { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: "solgrid-canvas", version: "0.1.4" } });
+            await connection.request("initialize", { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: "solgrid-canvas", version: "0.2.0" } });
             return connection;
         })().finally(() => {
             initializing = null;
