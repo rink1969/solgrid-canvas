@@ -53,9 +53,11 @@ try {
 
     // 工具目录
     const tools = await fetch(`${BASE}/api/tools?q=image`, { headers }).then((r) => r.json());
-    check("discover 返回候选", tools.results?.[0]?.endpoint === "/v1/fake-image", JSON.stringify(tools).slice(0, 200));
+    check("tools list 返回候选", tools.results?.[0]?.endpoint === "/v1/fake-image", JSON.stringify(tools).slice(0, 200));
     const toolsCached = await fetch(`${BASE}/api/tools?q=image`, { headers }).then((r) => r.json());
-    check("discover 走缓存", toolsCached.results?.[0]?.endpoint === "/v1/fake-image");
+    check("tools list 走缓存", toolsCached.results?.[0]?.endpoint === "/v1/fake-image");
+    const catalog = await fetch(`${BASE}/api/tools/catalog?refresh=1`, { headers }).then((r) => r.json());
+    check("tools categories 归入图片/视频/音频", catalog.catalog?.image?.[0]?.endpoint === "/v1/fake-image" && catalog.catalog?.video?.[0]?.endpoint === "/v1/video/fake" && catalog.catalog?.audio?.length >= 2, JSON.stringify(catalog).slice(0, 300));
     const detail = await fetch(`${BASE}/api/tools/detail?provider=fake&endpoint=/v1/fake-image`, { headers }).then((r) => r.json());
     check("inspect 返回 schema", detail.detail?.input?.body?.properties?.prompt?.type === "string");
 

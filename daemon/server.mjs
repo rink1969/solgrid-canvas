@@ -249,13 +249,16 @@ async function handle(req, res) {
         return;
     }
 
-    // ---- 工具目录：discover / inspect（缓存 24h，失败时退回旧缓存）----
+    // ---- 工具目录：solgrid tools / inspect（缓存 24h，失败时退回旧缓存）----
     if (pathname === "/api/tools" && req.method === "GET") {
         const query = String(url.searchParams.get("q") || "").trim();
         if (!query) return sendJson(res, 400, { error: "missing_query" });
-        const key = `discover:${query}`;
+        const key = `tools:q:${query}`;
         try {
-            const results = await gateway.discover(query);
+            const data = await gateway.listTools({ query, limit: 20 });
+            const results = (data.items || [])
+                .filter((item) => item?.provider && item?.endpoint)
+                .map((item) => ({ provider: item.provider, endpoint: item.endpoint, description: item.description, price: item.price, tags: item.tags || item.categories || [] }));
             catalog.put(key, results);
             return sendJson(res, 200, { results, cached: false });
         } catch (error) {
@@ -265,29 +268,35 @@ async function handle(req, res) {
         }
     }
 
-    // 平台模型目录：discover 多个关键词按能力归类，缓存 24h（?refresh=1 强制刷新）
+    // 平台模型目录：solgrid tools categories + list，按类别归到图片/视频/音频，缓存 24h（?refresh=1 强制刷新）
     if (pathname === "/api/tools/catalog" && req.method === "GET") {
-        const key = "catalog:v1";
+        const key = "catalog:v2";
         const force = url.searchParams.get("refresh") === "1";
         if (!force) {
             const cached = catalog.get(key, 24 * 60 * 60 * 1000);
             if (cached) return sendJson(res, 200, { catalog: cached, cached: true });
         }
         try {
-            const queries = ["image", "video", "audio"];
+            const categoryBuckets = { image: "image", video: "video", music: "audio", "sound-effect": "audio", speech: "audio", "audio-editing": "audio" };
+            const categories = await gateway.toolCategories();
             const buckets = { image: [], video: [], audio: [] };
             const seen = new Set();
-            for (const query of queries) {
-                const results = await gateway.discover(query, 100);
-                for (const item of results) {
-                    if (!item?.provider || !item?.endpoint) continue;
-                    const id = `${item.provider}|${item.endpoint}`;
-                    if (seen.has(id)) continue;
-                    seen.add(id);
-                    const endpoint = String(item.endpoint);
-                    const bucket = /image-to-video|\/video\//.test(endpoint) ? "video" : /\/image\//.test(endpoint) ? "image" : /audio|t2a|tts|music|speech|sound/i.test(endpoint) ? "audio" : null;
-                    if (!bucket) continue;
-                    buckets[bucket].push({ provider: item.provider, endpoint, description: item.description, price: item.price });
+            for (const category of categories) {
+                const bucket = categoryBuckets[category.code];
+                if (!bucket) continue;
+                let page = 1;
+                let totalPages = 1;
+                while (page <= totalPages && page <= 20) {
+                    const data = await gateway.listTools({ category: category.code, limit: 100, page });
+                    for (const item of data.items || []) {
+                        if (!item?.provider || !item?.endpoint) continue;
+                        const id = `${item.provider}|${item.endpoint}`;
+                        if (seen.has(id)) continue;
+                        seen.add(id);
+                        buckets[bucket].push({ provider: item.provider, endpoint: item.endpoint, description: item.description, price: item.price });
+                    }
+                    totalPages = Math.max(1, Number(data.totalPages) || 1);
+                    page += 1;
                 }
             }
             buckets.image.sort((a, b) => (a.provider + a.endpoint).localeCompare(b.provider + b.endpoint));

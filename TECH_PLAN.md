@@ -2,7 +2,7 @@
 
 > 版本 v0.2（草案）· 依据 `REQUIREMENTS.md` 需求 + 上游 `basketikun/infinite-canvas` v0.20.0（commit `9cd3dea`）基线 + 平台实测契约
 > **基线已切换**：放弃 solgrid fork，直接从上游拉代码。fork 相对上游只多两个 commit（solgrid 渠道预设/脚本、拉片插件），二者都不继承；有价值的是**实测知识**，已移植到 `notes/`（`solgrid-findings.md`、`lapian-methodology.md`）。
-> 结论先行，细节在后。所有"实测"结论都有出处（`notes/solgrid-findings.md`、CLI `discover/inspect` 实跑、源码核对）。
+> 结论先行，细节在后。所有"实测"结论都有出处（`notes/solgrid-findings.md`、CLI `tools list/categories` / `inspect` 实跑、源码核对）。
 
 ---
 
@@ -16,7 +16,7 @@
 | 进程模型 | **本地 daemon + 浏览器 UI**（不是纯前端，也不是云服务）。`npx solgrid-canvas` → 起本机服务 → 开画布 |
 | solgrid 调用放哪 | **只在 daemon 里**，通过本机已装的 `solgrid` CLI。浏览器不碰 API Key，不碰生成请求 |
 | 并发的唯一真相 | **全局单队列（默认 in-flight=1）**。平台账号级只允许 1 个在途 run，这是硬约束，必须有一个中心化执行点 |
-| 模型接入方式 | **目录驱动（discover/inspect → JSON Schema → 参数表单）+ provider family 归一化器**，取代现在"每个模型一份调用脚本" |
+| 模型接入方式 | **目录驱动（tools list/categories + inspect → JSON Schema → 参数表单）+ provider family 归一化器**，取代现在"每个模型一份调用脚本" |
 | 与 solgrid 的耦合点 | 只有两个 CLI 命令：`solgrid run -f body.json --idempotency-key K -j`（不带 `--wait`）+ `solgrid runs get -r R -j`。节点里存 `{provider, endpoint, params}`（§5.3.1），不把 solgrid 伪装成 OpenAI 渠道；平台加模型/改参数，画布不用发版 |
 | 复杂度 | 只保留三件不可砍的：单点串行、自带幂等键、runId 落盘（§5.2.1）。估价拦截、僵尸自愈、并发分道、成本报表**先砍**，极简版 150–200 行 |
 | 与本地 Agent 的关系 | **ACP 进、MCP 出**：画布作为 ACP client 驱动本地 Agent（借用它的模型/凭证/技能），同时作为 MCP server 供 Agent 操作画布；ACP `session/new` 的 `mcpServers` 把两者缝在一次连接里 |
@@ -287,7 +287,7 @@ const res = await exec("solgrid", ["runs", "get", "-r", r.remoteId, "-j"]);
 
 **目录驱动**：
 
-1. `solgrid discover -q <能力> --json` 建立候选表；`solgrid inspect -p <provider> -e <endpoint> --json` 拿到 `input.body/queryParams/pathParams` 的 JSON Schema + `price`。
+1. `solgrid tools list -q <关键词> --json` 建立候选表；`solgrid inspect -p <provider> -e <endpoint> --json` 拿到 `input.body/queryParams/pathParams` 的 JSON Schema + `price`。
 2. 结果按 `(provider, endpoint)` 缓存进 SQLite，TTL 24h，`--force` 可刷；缓存未命中时 UI 显示"加载中"而不是报错。
 3. 参数表单由 schema 驱动（体积小、模型自增无需发版）。
 
@@ -323,7 +323,7 @@ const res = await exec("solgrid", ["runs", "get", "-r", r.remoteId, "-j"]);
 
 `{provider, endpoint}` + `params` 就是 `solgrid run -p … -e … -f …` 的全部输入，画布只是把这些字段收集起来。于是：
 
-- **模型清单不用发版**：UI 的模型选择器读 catalog 缓存（`discover`/`inspect`），平台新增模型，刷新即出现。
+- **模型清单不用发版**：UI 的模型选择器读 catalog 缓存（`tools`/`inspect`），平台新增模型，刷新即出现。
 - **参数表单不用手写**：`inspect` 的 JSON Schema 直接驱动表单。
 - **不需要渠道配置**：key 在 CLI 里，画布凭 "solgrid CLI 已登录" 就能跑。
 
@@ -691,7 +691,7 @@ CREATE TABLE compositions(id TEXT PK, project_id TEXT, json TEXT, updated_at INT
 | 期 | 状态 | 说明 |
 |---|---|---|
 | **M0** | 基本完成 | daemon（零依赖）+ 项目目录存储（JSON Canvas 1.0）+ 鉴权/Origin 白名单 + 剥离 data/blob + web 双向同步 + `smoke.mjs` 20 项。<br>剩余：视口虚拟化（并入 M1）。 |
-| **M1** | 完成 | 已完成：**画布生成闭环**（节点选 provider/endpoint → daemon 按 family 转请求体 → 参考素材 `files upload` → 排队 → 产物落 assets → 节点回填）＋确认弹窗；**资产层**（上传→`assets/<sha256>`、Range 读取、内容去重，web 侧图片/视频/音频全部改走 daemon）＋**run 引擎**（`solgrid run` 提交、`runs get` 轮询、幂等键落盘、启动恢复、产物自动落地、记账）＋**工具目录缓存**（discover/inspect 24h）＋ `smoke-runs.mjs` 11 项（假 CLI，不花钱）。＋**raw JSON 与 schema 兜底**（节点面板显示请求体字段/参考价，可整段覆写 body，陌生 family 也可跑）＋**Solgrid 内置渠道**（渠道页只读展示，catalog 驱动）＋**偏好设置里的默认模型**（生图/生视频/声音）＋ `/image` `/video` 工作台下线。＋**运行历史面板**（列表/汇总/详情/取消/重试/删除，落盘实际请求体）＋**增量 op 同步**（`POST /projects/:id/ops` + op 日志 + rev 冲突回退，替代整份 PUT）。<br>可靠性收尾：run 完成回填节点（daemon 为唯一写入方，含多产物建节点）、刷新时有活跃 run 保持 loading 并轮询对齐、停止即取消远端。已删除本地代理（`canvas-proxy` / 设置页 / `withLocalProxy`）、`/image` `/video` 工作台文件、渠道编辑器组件。遗留（非阻塞）：`use-config-store` 的 channels/models 数据结构仍在（agent 站点工具引用）；文本生成不接入（LLM 复用本地 Agent）。 |
+| **M1** | 完成 | 已完成：**画布生成闭环**（节点选 provider/endpoint → daemon 按 family 转请求体 → 参考素材 `files upload` → 排队 → 产物落 assets → 节点回填）＋确认弹窗；**资产层**（上传→`assets/<sha256>`、Range 读取、内容去重，web 侧图片/视频/音频全部改走 daemon）＋**run 引擎**（`solgrid run` 提交、`runs get` 轮询、幂等键落盘、启动恢复、产物自动落地、记账）＋**工具目录缓存**（tools/inspect 24h）＋ `smoke-runs.mjs` 11 项（假 CLI，不花钱）。＋**raw JSON 与 schema 兜底**（节点面板显示请求体字段/参考价，可整段覆写 body，陌生 family 也可跑）＋**Solgrid 内置渠道**（渠道页只读展示，catalog 驱动）＋**偏好设置里的默认模型**（生图/生视频/声音）＋ `/image` `/video` 工作台下线。＋**运行历史面板**（列表/汇总/详情/取消/重试/删除，落盘实际请求体）＋**增量 op 同步**（`POST /projects/:id/ops` + op 日志 + rev 冲突回退，替代整份 PUT）。<br>可靠性收尾：run 完成回填节点（daemon 为唯一写入方，含多产物建节点）、刷新时有活跃 run 保持 loading 并轮询对齐、停止即取消远端。已删除本地代理（`canvas-proxy` / 设置页 / `withLocalProxy`）、`/image` `/video` 工作台文件、渠道编辑器组件。遗留（非阻塞）：`use-config-store` 的 channels/models 数据结构仍在（agent 站点工具引用）；文本生成不接入（LLM 复用本地 Agent）。 |
 | **M2** | 完成 | MCP server（11 个工具）+ 布点引擎 + 生成审批（画布确认）+ CLI + 技能包；**ACP 内嵌对话**：daemon 拉起 DSH ACP（`ELECTRON_RUN_AS_NODE` 跑 app.asar 内 CLI）、`session/new` 注入 canvas MCP、SSE 流转发、权限确认、模型切换。适配器可由 `CANVAS_ACP_COMMAND/ARGS` 覆盖；`sync-config` 同步桌面 provider/默认模型到 ACP profile。 |
 | M3 / M3b / M4 / M5 | 未开始 | 技能 / 编辑层 / 时间线 / 发布 |
 

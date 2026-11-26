@@ -7,7 +7,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
 
-// discover 结果缓存到模块级：节点面板频繁挂载时不重复拉起 CLI
+// tools 结果缓存到模块级：节点面板频繁挂载时不重复拉起 CLI
 const cache = new Map<string, Promise<SolgridTool[]>>();
 
 const QUERY: Record<"image" | "video" | "audio", string> = {

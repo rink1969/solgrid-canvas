@@ -89,10 +89,27 @@ if (command === "files" && argv[1] === "upload") {
     emit({ downloadUrl: `https://fake.local/${encodeURIComponent(name)}` });
 }
 
-if (command === "discover") {
-    emit({
-        results: [{ provider: "fake", endpoint: "/v1/fake-image", description: "fake image tool", price: { type: "PER_CALL", amount: { value: "3.9", currency: "Spark" } } }],
-    });
+const FAKE_TOOLS = [
+    { provider: "fake", providerName: "Fake", endpoint: "/v1/fake-image", displayName: "fake-image", description: "fake image tool", price: { type: "PER_CALL", amount: { value: "3.9", currency: "Spark" } }, categories: ["image"], tags: ["image"], invocationEnabled: true },
+    { provider: "fake", providerName: "Fake", endpoint: "/v1/video/fake", displayName: "fake-video", description: "fake video tool", price: { type: "PER_CALL", amount: { value: "9", currency: "Spark" } }, categories: ["video"], tags: ["video"], invocationEnabled: true },
+    { provider: "fake", providerName: "Fake", endpoint: "/v1/text-to-speech", displayName: "fake-tts", description: "fake speech tool", price: { type: "PER_CALL", amount: { value: "1", currency: "Spark" } }, categories: ["speech"], tags: ["audio"], invocationEnabled: true },
+    { provider: "fake", providerName: "Fake", endpoint: "/v1/music", displayName: "fake-music", description: "fake music tool", price: { type: "PER_CALL", amount: { value: "2", currency: "Spark" } }, categories: ["music"], tags: ["audio"], invocationEnabled: true },
+];
+
+if (command === "tools" && argv[1] === "categories") {
+    const counts = {};
+    for (const tool of FAKE_TOOLS) for (const category of tool.categories) counts[category] = (counts[category] || 0) + 1;
+    emit({ items: Object.entries(counts).map(([code, total]) => ({ code, total, names: { zh: code, en: code } })) });
+}
+
+if (command === "tools" && argv[1] === "list") {
+    const category = flag("-c");
+    const query = String(flag("-q") || "").toLowerCase();
+    const limit = Math.max(1, Math.min(100, Number(flag("-l")) || 20));
+    const page = Math.max(1, Number(flag("--page")) || 1);
+    const filtered = FAKE_TOOLS.filter((tool) => (!category || tool.categories.includes(category)) && (!query || `${tool.provider} ${tool.endpoint} ${tool.description}`.toLowerCase().includes(query)));
+    const start = (page - 1) * limit;
+    emit({ items: filtered.slice(start, start + limit), pageIndex: page, pageSize: limit, total: filtered.length, totalPages: Math.max(1, Math.ceil(filtered.length / limit)) });
 }
 
 if (command === "inspect") {

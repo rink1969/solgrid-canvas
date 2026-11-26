@@ -3,7 +3,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 
-const TIMEOUTS = { run: 180_000, get: 60_000, stop: 30_000, discover: 60_000, inspect: 60_000, upload: 300_000 };
+const TIMEOUTS = { run: 180_000, get: 60_000, stop: 30_000, tools: 60_000, inspect: 60_000, upload: 300_000 };
 
 function resolveBinary() {
     const configured = process.env.CANVAS_SOLGRID_BIN || "solgrid";
@@ -145,9 +145,16 @@ export function createGateway() {
             assertSafe(remoteRunId, "runId");
             return callCli(["runs", "stop", "-r", remoteRunId, "-j"], "stop");
         },
-        async discover(query, limit = 20) {
-            const json = await callCli(["discover", "-q", sanitizeQuery(query), "-l", String(limit), "-j"], "discover");
-            return unwrap(json).results || [];
+        async toolCategories() {
+            const json = await callCli(["tools", "categories", "-j"], "tools");
+            return unwrap(json).items || [];
+        },
+        async listTools({ category, query, limit = 100, page = 1 } = {}) {
+            const args = ["tools", "list", "-j", "-l", String(limit), "--page", String(page)];
+            if (category) args.push("-c", String(category));
+            if (query) args.push("-q", sanitizeQuery(query));
+            const json = await callCli(args, "tools");
+            return unwrap(json);
         },
         async uploadFile(filePath) {
             assertPathSafe(filePath);

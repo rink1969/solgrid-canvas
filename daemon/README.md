@@ -64,7 +64,7 @@ CANVAS_TOKEN=<daemon.json 里的 token>
 | GET | `/api/events?client=<id>` | SSE：`project.updated` / `project.deleted` / `run.updated` |
 | POST | `/api/projects/:id/assets?mime=…` | 上传二进制，返回 `{assetId,file,bytes}` |
 | GET | `/api/projects/:id/assets/:file` | 读取资产（支持 Range） |
-| GET | `/api/tools?q=…` | `solgrid discover` 结果（缓存 24h） |
+| GET | `/api/tools?q=…` | `solgrid tools list -q` 结果（缓存 24h） |
 | GET | `/api/tools/detail?provider=&endpoint=` | `solgrid inspect` 契约（缓存 24h） |
 | POST | `/api/runs` | 入队生成：`{projectId,nodeId?,provider,endpoint,params}`；`params` 是画布语义（prompt/size/references/seconds/resolution…），`params.rawBody` 可直接给请求体 |
 | GET | `/api/runs?projectId=` | run 列表摘要（不含 body） |
