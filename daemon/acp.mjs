@@ -636,7 +636,7 @@ export function createAgentManager({ broadcast, log }) {
             });
             connection = conn;
             try {
-                await conn.request("initialize", { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: "solgrid-canvas", version: "0.2.2" } });
+                await conn.request("initialize", { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: "solgrid-canvas", version: "0.2.3" } });
             } catch (error) {
                 if (connection === conn) connection = null;
                 throw error;

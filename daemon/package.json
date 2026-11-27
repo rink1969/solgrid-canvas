@@ -1,7 +1,7 @@
 {
     "name": "@solgrid/canvas-daemon",
     "private": true,
-    "version": "0.2.2",
+    "version": "0.2.3",
     "type": "module",
     "description": "solgrid canvas 本地 daemon：项目目录存储 + run 账本 + 资产落地（零依赖，Node ≥22）",
     "scripts": {
