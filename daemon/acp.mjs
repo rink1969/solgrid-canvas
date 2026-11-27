@@ -456,6 +456,19 @@ export function createAgentManager({ broadcast, log }) {
                 emit(item.projectId, item.conversationId, { kind: "permission-decided", id, allow });
                 return true;
             },
+            // 前端轮询兜底：ACP permission 是 request，错过通知时靠这里把待决项捞回来
+            listPermissions(projectId, conversationId) {
+                return [...permissions.entries()]
+                    .filter(([, item]) => (!projectId || item.projectId === projectId) && (!conversationId || item.conversationId === conversationId))
+                    .map(([id, item]) => ({
+                        id,
+                        projectId: item.projectId,
+                        conversationId: item.conversationId,
+                        title: String(item.params?.toolCall?.title || item.params?.toolCall?.kind || "权限请求"),
+                        toolCall: item.params?.toolCall,
+                        options: item.params?.options,
+                    }));
+            },
             close() {
                 connection?.close();
                 connection = null;

@@ -17,6 +17,8 @@
 + [修复] 节点标题框与输入框的 Enter 在输入法组字/刚结束 120ms 内不再被当成提交，选词不会误关闭编辑。
 + [优化] 节点标题悬停回调改为稳定引用，修复 CanvasNode 的 memo 被击穿导致每次按键全量重渲染（大画布输入延迟）。
 
++ [修复] `/api/agent/permissions` 轮询一直 500：ACP manager 缺少 `listPermissions`（当初只加了路由和前端轮询，方法没实现），打开 Agent 面板后 daemon 每轮都报 `agent.listPermissions is not a function`；补上待决权限查询。
+
 ## 0.2.2 - 2026-11-26
 
 + [修复] Agent 输入框用中文输入法时，候选字浮层与默认提示文案重叠；组词/输入过程中隐藏提示文案。
