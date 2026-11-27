@@ -495,12 +495,12 @@ async function handle(req, res) {
             }
             if (!body?.text) return sendJson(res, 400, { error: "missing_text" });
             try {
-                await agent.prompt(projectId, cwd, conversationId, String(body.text));
-                return sendJson(res, 200, { ok: true });
+                const result = await agent.prompt(projectId, cwd, conversationId, String(body.text));
+                return sendJson(res, 200, { ok: true, turnId: result?.turnId });
             } catch (error) {
                 if (error.code === "agent_busy") {
                     res.setHeader("retry-after", "5");
-                    return sendJson(res, 409, { error: "agent_busy", message: error.message, retryAfterSeconds: 5 });
+                    return sendJson(res, 409, { error: "agent_busy", message: error.message, retryAfterSeconds: 5, turnId: error.turnId });
                 }
                 return sendJson(res, 400, { error: "agent_prompt_failed", message: error.message });
             }

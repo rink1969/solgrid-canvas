@@ -127,6 +127,15 @@ const CANVAS_OPS_SCHEMA = {
             { type: "object", required: ["type", "ids"], properties: { type: { const: "remove_edges" }, ids: { type: "array", items: { type: "string" } } } },
             { type: "object", required: ["type", "patch"], properties: { type: { const: "update_meta" }, patch: { type: "object" } } },
             { type: "object", required: ["type", "ids", "dx", "dy"], properties: { type: { const: "move_nodes" }, ids: { type: "array", items: { type: "string" } }, dx: { type: "number" }, dy: { type: "number" } } },
+            {
+                type: "object",
+                required: ["type", "placements"],
+                properties: {
+                    type: { const: "place_nodes" },
+                    placements: { type: "array", items: { type: "object", required: ["id", "x", "y"], properties: { id: { type: "string" }, x: { type: "number" }, y: { type: "number" } } } },
+                },
+            },
+            { type: "object", required: ["type", "viewport"], properties: { type: { const: "set_viewport" }, viewport: { type: "object", required: ["x", "y", "k"], properties: { x: { type: "number" }, y: { type: "number" }, k: { type: "number" } } } } },
         ],
     },
 };
@@ -225,6 +234,17 @@ function pickNodeSummary(node) {
     };
 }
 
+function pickNodePositionSummary(node) {
+    return {
+        id: node.id,
+        type: node.type,
+        title: node.title,
+        position: { x: Math.round(node.position.x), y: Math.round(node.position.y) },
+        size: { width: node.width, height: node.height },
+        status: node.metadata?.status,
+    };
+}
+
 const TOOLS = [
     {
         name: "canvas_list_projects",
@@ -233,13 +253,18 @@ const TOOLS = [
     },
     {
         name: "canvas_get_state",
-        description: "读取一个画布：项目元信息（viewport/backgroundMode/showImageInfo）、节点摘要、连线、标题。用于了解当前画面再决定怎么改。",
+        description: "读取一个画布：项目元信息（viewport/backgroundMode/showImageInfo）、节点摘要、连线、标题。mode=summary 只回 {id,type,title,position,size,status}（大画布先拿摘要）；可用 types / bbox / limit / offset 过滤与分页。细节用 canvas_get_node。",
         inputSchema: {
             type: "object",
             properties: {
                 projectId: { type: "string" },
                 nodeIds: { type: "array", items: { type: "string" }, description: "只看这些节点" },
                 includeConnections: { type: "boolean", default: true },
+                mode: { type: "string", enum: ["full", "summary"], default: "full", description: "summary 只回 id/type/title/position/size/status，不带 prompt/content" },
+                types: { type: "array", items: { type: "string" }, description: "按节点类型过滤，如 [\"image\",\"text\"]" },
+                bbox: { type: "object", description: "只看与 {x,y,width,height} 相交的节点", properties: { x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" } } },
+                limit: { type: "number", default: 200, description: "最多返回多少节点（默认 200），配 total 分页" },
+                offset: { type: "number", default: 0 },
             },
             required: ["projectId"],
         },
@@ -250,9 +275,22 @@ const TOOLS = [
         inputSchema: { type: "object", properties: { projectId: { type: "string" }, nodeId: { type: "string" } }, required: ["projectId", "nodeId"] },
     },
     {
+        name: "canvas_fit_group",
+        description: "按成员重新计算分组框（内边距 24，顶部 52）并写回：给 groupId（可再给 nodeIds 限定成员），或给 nodeIds 从成员的 groupId 反推组。成员不动，只改组框几何。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                projectId: { type: "string" },
+                groupId: { type: "string", description: "目标组节点 id；省略时从 nodeIds 的 metadata.groupId 反推" },
+                nodeIds: { type: "array", items: { type: "string" }, description: "限定成员；省略时取该组全部成员" },
+            },
+            required: ["projectId"],
+        },
+    },
+    {
         name: "canvas_apply_ops",
         description:
-            "批量修改画布，原子生效。每个 op 用 type 判别：add_node{node} / update_node{id,patch} / remove_nodes{ids} / add_edge{edge} / remove_edges{ids} / update_meta{patch} / move_nodes{ids,dx,dy}。add_node.node 需 {id,type,position:{x,y},width,height}；add_edge.edge 需 {id,fromNodeId,toNodeId}；update_node.patch 几何字段用 position:{x,y}, width,height（也兼容顶层 x/y，必须为数字）。update_meta 可写 title/backgroundMode/showImageInfo/viewport/activeChatId/chatSessions。返回新 rev。",
+            "批量修改画布，原子生效。每个 op 用 type 判别：add_node{node} / update_node{id,patch} / remove_nodes{ids} / add_edge{edge} / remove_edges{ids} / update_meta{patch} / move_nodes{ids,dx,dy} / place_nodes{placements:[{id,x,y}]} / set_viewport{viewport}。add_node.node 需 {id,type,position:{x,y},width,height}；add_edge.edge 需 {id,fromNodeId,toNodeId}；update_node.patch 几何字段用 position:{x,y}, width,height（也兼容顶层 x/y）；⚠ 改节点标题用顶层 patch.title（不是 metadata.title）；写错/未知字段会直接报错。update_meta 可写 title/backgroundMode/showImageInfo/viewport/activeChatId/chatSessions；⚠ viewport 是项目级单值，改了会搬动正在看画布的人，汇报用请勿改。返回新 rev。",
         inputSchema: {
             type: "object",
             properties: {
@@ -407,10 +445,52 @@ const HANDLERS = {
         return projects.map((project) => ({ id: project.id, title: project.title, updatedAt: project.updatedAt }));
     },
 
-    async canvas_get_state({ projectId, nodeIds, includeConnections = true }) {
+    async canvas_get_state({ projectId, nodeIds, includeConnections = true, mode = "full", types, bbox, limit = 200, offset = 0 }) {
         const project = await getProject(projectId);
-        const nodes = (nodeIds?.length ? project.nodes.filter((node) => nodeIds.includes(node.id)) : project.nodes).map(pickNodeSummary);
-        return { project: { id: project.id, title: project.title, rev: project.rev, viewport: project.viewport, backgroundMode: project.backgroundMode, showImageInfo: project.showImageInfo }, nodes, connections: includeConnections ? project.connections : undefined };
+        let picked = nodeIds?.length ? project.nodes.filter((node) => nodeIds.includes(node.id)) : project.nodes;
+        if (Array.isArray(types) && types.length) picked = picked.filter((node) => types.includes(node.type));
+        if (bbox && Number.isFinite(Number(bbox.width))) {
+            const area = { x: Number(bbox.x) || 0, y: Number(bbox.y) || 0, width: Number(bbox.width), height: Number(bbox.height) || 0 };
+            picked = picked.filter((node) => node.position.x < area.x + area.width && node.position.x + node.width > area.x && node.position.y < area.y + area.height && node.position.y + node.height > area.y);
+        }
+        const total = picked.length;
+        const start = Math.max(0, Math.floor(Number(offset) || 0));
+        const size = Math.max(1, Math.floor(Number(limit) || 200));
+        const page = picked.slice(start, start + size);
+        const nodes = mode === "summary" ? page.map(pickNodePositionSummary) : page.map(pickNodeSummary);
+        return {
+            project: { id: project.id, title: project.title, rev: project.rev, viewport: project.viewport, backgroundMode: project.backgroundMode, showImageInfo: project.showImageInfo },
+            nodes,
+            total,
+            offset: start,
+            truncated: start + page.length < total,
+            connections: includeConnections ? project.connections : undefined,
+        };
+    },
+
+    async canvas_fit_group({ projectId, groupId, nodeIds }) {
+        const project = await getProject(projectId);
+        let target = groupId ? project.nodes.find((node) => node.id === groupId) : null;
+        if (groupId && !target) throw new Error(`分组不存在：${groupId}`);
+        if (target && target.type !== "group") throw new Error(`不是分组节点：${groupId}`);
+        const members = project.nodes.filter((node) => node.type !== "group" && (nodeIds?.length ? nodeIds.includes(node.id) : target ? node.metadata?.groupId === target.id : false));
+        if (!members.length) throw new Error("分组没有成员，无法重算组框");
+        if (!target) {
+            const guessed = [...new Set(members.map((node) => node.metadata?.groupId).filter((id) => typeof id === "string"))];
+            if (guessed.length !== 1) throw new Error("无法确定目标分组：请显式传 groupId");
+            target = project.nodes.find((node) => node.id === guessed[0]);
+            if (!target) throw new Error(`分组不存在：${guessed[0]}`);
+        }
+        const left = Math.min(...members.map((node) => node.position.x));
+        const top = Math.min(...members.map((node) => node.position.y));
+        const right = Math.max(...members.map((node) => node.position.x + node.width));
+        const bottom = Math.max(...members.map((node) => node.position.y + node.height));
+        const rect = { x: Math.round(left - 24), y: Math.round(top - 52), width: Math.round(right - left + 48), height: Math.round(bottom - top + 76) };
+        const result = await api(`/api/projects/${projectId}/ops`, {
+            method: "POST",
+            body: JSON.stringify({ ops: [{ type: "update_node", id: target.id, patch: { position: { x: rect.x, y: rect.y }, width: rect.width, height: rect.height } }], origin: "agent" }),
+        });
+        return { rev: result.rev, groupId: target.id, rect, members: members.length };
     },
 
     async canvas_get_node({ projectId, nodeId }) {

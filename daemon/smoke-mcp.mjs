@@ -132,7 +132,8 @@ try {
     check("工具数 >= 10", names.length >= 10, String(names.length));
     check("包含关键工具", ["canvas_get_state", "canvas_apply_ops", "canvas_place_artifacts", "canvas_run_nodes", "canvas_watch_run"].every((name) => names.includes(name)));
     const opsTool = (tools.result?.tools || []).find((tool) => tool.name === "canvas_apply_ops");
-    check("apply_ops schema 是 oneOf", Array.isArray(opsTool?.inputSchema?.properties?.ops?.items?.oneOf) && opsTool.inputSchema.properties.ops.items.oneOf.length === 7);
+    check("apply_ops schema 是 oneOf", Array.isArray(opsTool?.inputSchema?.properties?.ops?.items?.oneOf) && opsTool.inputSchema.properties.ops.items.oneOf.length === 9);
+    check("包含 fit_group 工具", names.includes("canvas_fit_group"));
 
     const projects = await call("canvas_list_projects", {});
     check("list_projects 能看到项目", projects.data.some((item) => item.id === "mcpproj"));
@@ -163,6 +164,23 @@ try {
     const summary = await call("canvas_get_state", { projectId: "mcpproj" });
     const textSummary = summary.data.nodes.find((node) => node.id === "text1");
     check("get_state 摘要包含文本内容", textSummary?.content === "你好，世界", JSON.stringify(textSummary).slice(0, 160));
+
+    const brief = await call("canvas_get_state", { projectId: "mcpproj", mode: "summary", types: ["text"] });
+    const briefText = brief.data?.nodes?.find((node) => node.id === "text1");
+    check("get_state summary 只回位置/尺寸/状态", Boolean(briefText) && briefText.content === undefined && Boolean(briefText.position) && Boolean(briefText.size), JSON.stringify(briefText).slice(0, 200));
+
+    const fitBase = await call("canvas_get_state", { projectId: "mcpproj", mode: "summary" });
+    const grouped = await call("canvas_apply_ops", {
+        projectId: "mcpproj",
+        expectRev: fitBase.data.project.rev,
+        ops: [
+            { type: "add_node", node: { id: "grp1", type: "group", title: "组", position: { x: 0, y: 0 }, width: 100, height: 100, metadata: {} } },
+            { type: "add_node", node: { id: "mem1", type: "image", title: "成员", position: { x: 100.4, y: 200.6 }, width: 300, height: 200, metadata: { groupId: "grp1" } } },
+        ],
+    });
+    check("准备分组节点", !grouped.isError, JSON.stringify(grouped.data).slice(0, 160));
+    const fitted = await call("canvas_fit_group", { projectId: "mcpproj", groupId: "grp1" });
+    check("fit_group 按成员重算组框", !fitted.isError && fitted.data?.rect?.x === 76 && fitted.data?.rect?.y === 149, JSON.stringify(fitted.data).slice(0, 200));
 
     const beforeFile = await call("canvas_get_state", { projectId: "mcpproj" });
     const addFile = await call("canvas_apply_ops", {

@@ -243,6 +243,7 @@ export function createAgentManager({ broadcast, log }) {
                         conversationId: runtime.conversationId,
                         sessionId: runtime.sessionId,
                         running: runtime.running,
+                        lastTurn: runtime.lastTurn ? { id: runtime.lastTurn.id, status: runtime.lastTurn.status, startedAt: runtime.lastTurn.startedAt, finishedAt: runtime.lastTurn.finishedAt, error: runtime.lastTurn.error } : null,
                         configOptions: runtime.configOptions,
                     })),
                 };
@@ -384,8 +385,11 @@ export function createAgentManager({ broadcast, log }) {
             },
             async prompt(projectId, cwd, conversationId, text) {
                 const runtime = await this.ensureSession(projectId, cwd, conversationId);
-                if (runtime.running) throw Object.assign(new Error("上一轮还在进行中"), { code: "agent_busy" });
+                if (runtime.running) throw Object.assign(new Error("上一轮还在进行中"), { code: "agent_busy", turnId: runtime.lastTurn?.id });
                 runtime.running = true;
+                // 每轮一个可查的 turnId：提交后凭它判断“这轮在不在跑 / 跑完没有”，忙时 409 也带上当前 turn
+                const turn = { id: crypto.randomUUID(), status: "running", startedAt: new Date().toISOString() };
+                runtime.lastTurn = turn;
                 const conversation = findConversation(projectId, cwd, conversationId);
                 if (!conversation.title || conversation.title === "新对话") conversation.title = String(text).slice(0, 24);
                 conversation.preview = String(text).slice(0, 80);
@@ -404,16 +408,21 @@ export function createAgentManager({ broadcast, log }) {
                     .then((result) => {
                         runtime.running = false;
                         const endedAt = new Date().toISOString();
+                        turn.status = "done";
+                        turn.finishedAt = endedAt;
                         const tail = runtime.transcript[runtime.transcript.length - 1];
                         if (tail && tail.role === "thought" && !tail.endedAt) tail.endedAt = endedAt;
                         conversation.updatedAt = new Date().toISOString();
                         saveConversations(projectId);
                         persistTranscript(projectId, conversationId, cwd, runtime.transcript, { immediate: true });
-                        emit(projectId, conversationId, { kind: "done", stopReason: result?.stopReason });
+                        emit(projectId, conversationId, { kind: "done", turnId: turn.id, stopReason: result?.stopReason });
                     })
                     .catch((error) => {
                         runtime.running = false;
                         const endedAt = new Date().toISOString();
+                        turn.status = "failed";
+                        turn.finishedAt = endedAt;
+                        turn.error = error.message;
                         const tail = runtime.transcript[runtime.transcript.length - 1];
                         if (tail && tail.role === "thought" && !tail.endedAt) tail.endedAt = endedAt;
                         persistTranscript(projectId, conversationId, cwd, runtime.transcript, { immediate: true });
@@ -422,12 +431,12 @@ export function createAgentManager({ broadcast, log }) {
                             bySession.delete(runtime.sessionId);
                             conversation.sessionId = null;
                             saveConversations(projectId);
-                            emit(projectId, conversationId, { kind: "done", error: "Agent 会话已失效，已重置，请重新发送" });
+                            emit(projectId, conversationId, { kind: "done", turnId: turn.id, error: "Agent 会话已失效，已重置，请重新发送" });
                             return;
                         }
-                        emit(projectId, conversationId, { kind: "done", error: error.message });
+                        emit(projectId, conversationId, { kind: "done", turnId: turn.id, error: error.message });
                     });
-                return { ok: true };
+                return { ok: true, turnId: turn.id };
             },
             async cancel(projectId, cwd, conversationId) {
                 const runtime = runtimes.get(runtimeKey(projectId, conversationId));

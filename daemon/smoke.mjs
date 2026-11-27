@@ -120,6 +120,26 @@ try {
     const badOp = await api("POST", "/api/projects/smoke1/ops", { ops: [{ type: "unknown_op" }] });
     check("未知 op 被拒", badOp.status === 400 && badOp.json.error === "invalid_op");
 
+    // 写错字段名必须报错，而不是静默无效
+    const unknownPatch = await api("POST", "/api/projects/smoke1/ops", { ops: [{ type: "update_node", id: "n1", patch: { w: 560 } }] });
+    check("update_node 未知字段被拒", unknownPatch.status === 400 && /未知字段/.test(unknownPatch.json.message || ""), JSON.stringify(unknownPatch.json).slice(0, 160));
+    const metaTitle = await api("POST", "/api/projects/smoke1/ops", { ops: [{ type: "update_node", id: "n1", patch: { metadata: { title: "错位置" } } }] });
+    check("metadata.title 被拒并提示顶层 title", metaTitle.status === 400 && /patch\.title/.test(metaTitle.json.message || ""), JSON.stringify(metaTitle.json).slice(0, 160));
+    const badMeta = await api("POST", "/api/projects/smoke1/ops", { ops: [{ type: "update_meta", patch: { showNodeLabels: true } }] });
+    check("update_meta 未知字段被拒", badMeta.status === 400 && /未知字段/.test(badMeta.json.message || ""), JSON.stringify(badMeta.json).slice(0, 160));
+
+    const placed = await api("POST", "/api/projects/smoke1/ops", {
+        ops: [
+            { type: "place_nodes", placements: [{ id: "n1", x: 11.6, y: -20.4 }] },
+            { type: "set_viewport", viewport: { x: 1.25, y: 2.5, k: 0.8 } },
+        ],
+    });
+    check("place_nodes / set_viewport 生效", placed.status === 200, JSON.stringify(placed.json));
+    const afterPlace = await api("GET", "/api/projects/smoke1");
+    const placedPosition = afterPlace.json.project.nodes.find((node) => node.id === "n1").position;
+    check("绝对定位坐标取整", placedPosition.x === 12 && placedPosition.y === -20, JSON.stringify(placedPosition));
+    check("set_viewport 写回 meta.viewport", afterPlace.json.project.viewport?.k === 0.8, JSON.stringify(afterPlace.json.project.viewport));
+
     // ---- 资产：上传 / 去重 / 读取 / Range ----
     const png = Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63600000020001e621bc330000000049454e44ae426082", "hex");
     const uploadAsset = async (buffer, mime) => {

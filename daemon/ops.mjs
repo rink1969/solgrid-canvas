@@ -1,5 +1,25 @@
 // 增量 op：画布改动不再整份覆盖，按 op 应用（Agent 的 canvas_apply_ops 复用同一套）
 const META_KEYS = ["title", "backgroundMode", "showImageInfo", "viewport", "activeChatId", "chatSessions"];
+// update_node/add_node 的已知字段：写错字段名（w/h/nodeType…）直接报错，不再静默丢弃
+const NODE_PATCH_KEYS = ["type", "title", "position", "x", "y", "width", "height", "metadata"];
+const NODE_ADD_KEYS = ["id", "type", "title", "position", "x", "y", "width", "height", "metadata", "x-solgrid"];
+
+function assertKeys(object, allowed, label) {
+    const unknown = Object.keys(object || {}).filter((key) => !allowed.includes(key));
+    if (!unknown.length) return;
+    throw Object.assign(new Error(`${label} 含未知字段：${unknown.join(", ")}（几何用 position:{x,y}/width/height，改标题用顶层 title）`), { code: "invalid_op" });
+}
+
+function normalizeViewport(viewport) {
+    ensure(viewport && typeof viewport === "object", "viewport 必须是 {x,y,k}");
+    const next = {
+        x: toFiniteNumber(viewport.x, "viewport.x"),
+        y: toFiniteNumber(viewport.y, "viewport.y"),
+        k: toFiniteNumber(viewport.k, "viewport.k"),
+    };
+    ensure(next.k > 0, "viewport.k 必须大于 0");
+    return next;
+}
 
 function ensure(condition, message) {
     if (!condition) throw Object.assign(new Error(message), { code: "invalid_op" });
@@ -37,8 +57,8 @@ function normalizeGeometry(node, current) {
     if (position === undefined) position = current?.position || { x: 0, y: 0 };
     ensure(position && typeof position === "object", "position 必须是 {x,y}");
     next.position = {
-        x: toFiniteNumber(position.x ?? current?.position?.x ?? 0, "position.x"),
-        y: toFiniteNumber(position.y ?? current?.position?.y ?? 0, "position.y"),
+        x: Math.round(toFiniteNumber(position.x ?? current?.position?.x ?? 0, "position.x")),
+        y: Math.round(toFiniteNumber(position.y ?? current?.position?.y ?? 0, "position.y")),
     };
     delete next.x;
     delete next.y;
@@ -110,6 +130,7 @@ export function applyOps(store, projectId, ops) {
             case "add_node": {
                 ensure(op.node?.id, "add_node 需要 node.id");
                 ensure(!nodes.has(op.node.id), `add_node 节点 id 已存在：${op.node.id}`);
+                assertKeys(op.node, NODE_ADD_KEYS, "add_node.node");
                 nodes.set(op.node.id, normalizeAddedNode(op.node));
                 break;
             }
@@ -117,6 +138,10 @@ export function applyOps(store, projectId, ops) {
                 ensure(op.id && nodes.has(op.id), `update_node 节点不存在：${op.id}`);
                 const current = nodes.get(op.id);
                 ensure(op.patch?.id === undefined || op.patch.id === op.id, "update_node 不允许修改节点 id");
+                assertKeys(op.patch || {}, NODE_PATCH_KEYS, "update_node.patch");
+                if (op.patch?.title === undefined && op.patch?.metadata && "title" in op.patch.metadata) {
+                    throw Object.assign(new Error("改节点标题请用顶层 patch.title，不要写 metadata.title（update_meta 改的是画布标题）"), { code: "invalid_op" });
+                }
                 const patch = normalizeGeometry(op.patch || {}, current);
                 nodes.set(op.id, { ...current, ...patch, metadata: { ...current.metadata, ...(patch.metadata || {}) } });
                 break;
@@ -139,18 +164,16 @@ export function applyOps(store, projectId, ops) {
                 break;
             }
             case "update_meta": {
+                assertKeys(op.patch || {}, META_KEYS, "update_meta.patch");
                 for (const key of META_KEYS) {
                     if (key in (op.patch || {})) meta[key] = op.patch[key];
                 }
-                if (meta.viewport !== undefined) {
-                    ensure(meta.viewport && typeof meta.viewport === "object", "viewport 必须是 {x,y,k}");
-                    meta.viewport = {
-                        x: toFiniteNumber(meta.viewport.x, "viewport.x"),
-                        y: toFiniteNumber(meta.viewport.y, "viewport.y"),
-                        k: toFiniteNumber(meta.viewport.k, "viewport.k"),
-                    };
-                    ensure(meta.viewport.k > 0, "viewport.k 必须大于 0");
-                }
+                if (meta.viewport !== undefined) meta.viewport = normalizeViewport(meta.viewport);
+                break;
+            }
+            // 与前端 op 方言对齐：前端 Agent 侧用 set_viewport，daemon 侧统一落到 meta.viewport
+            case "set_viewport": {
+                meta.viewport = normalizeViewport(op.viewport);
                 break;
             }
             case "move_nodes": {
@@ -159,7 +182,23 @@ export function applyOps(store, projectId, ops) {
                 for (const id of op.ids || []) {
                     const current = nodes.get(id);
                     if (!current) continue;
-                    nodes.set(id, { ...current, position: { x: current.position.x + dx, y: current.position.y + dy } });
+                    nodes.set(id, { ...current, position: { x: Math.round(current.position.x + dx), y: Math.round(current.position.y + dy) } });
+                }
+                break;
+            }
+            // 绝对定位：栅格化排版的场景一次落位，不用逐节点 update_node
+            case "place_nodes": {
+                ensure(Array.isArray(op.placements) && op.placements.length > 0, "place_nodes 需要 placements:[{id,x,y}]");
+                for (const item of op.placements) {
+                    const current = nodes.get(item?.id);
+                    ensure(current, `place_nodes 节点不存在：${item?.id}`);
+                    nodes.set(item.id, {
+                        ...current,
+                        position: {
+                            x: Math.round(toFiniteNumber(item.x, "placements.x")),
+                            y: Math.round(toFiniteNumber(item.y, "placements.y")),
+                        },
+                    });
                 }
                 break;
             }

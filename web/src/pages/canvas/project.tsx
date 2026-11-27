@@ -971,7 +971,8 @@ function InfiniteCanvasPage() {
     const sendNodeToAgent = useCallback((nodeId: string) => {
         const node = nodesRef.current.find((item) => item.id === nodeId);
         if (!node) return;
-        const [reference] = buildCanvasResourceReferences([node]);
+        // label 按整张画布编号（与 @ 提及列表同一套），避免单节点构造时序号恒为 1、多个 marker 撞名
+        const reference = buildCanvasResourceReferences(nodesRef.current).find((item) => item.nodeId === node.id);
         if (!reference) return;
         const current = useAgentStore.getState().canvasReferences;
         if (!current.some((item) => item.nodeId === reference.nodeId)) {
@@ -3998,6 +3999,7 @@ function InfiniteCanvasPage() {
                     onCancel={() => setPreviewNodeId(null)}
                     footer={null}
                     width="auto"
+                    destroyOnHidden
                     styles={{ body: { padding: 0, display: "flex", justifyContent: "center", alignItems: "center", maxHeight: "80vh" } }}
                 >
                     {previewContent ? (

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
++ [修复] 视频节点：预览弹窗关闭后仍在播放（Modal 补 `destroyOnHidden`）；点击节点即播放——内容默认不接管指针，工具栏可切「交互/移动」，双击节点打开查看弹窗。
++ [修复] 右键「发送到对话」多个节点只有第一个能插入：label 改为按整张画布编号（与 @ 提及一致），marker 不再撞名。
++ [修复] 写错字段不再静默：`update_node` / `add_node` / `update_meta` 含未知字段直接报错；改节点标题必须用顶层 `title`，写 `metadata.title` 会报错并提示。
++ [修复] 几何坐标统一取整（位置与宽高），存量小数坐标随下一次写入归一。
++ [新增] `canvas_apply_ops` 支持 `place_nodes{placements}` 绝对定位与 `set_viewport`（与前端 op 方言对齐）。
++ [新增] `canvas_fit_group`：按成员与 24/52 内边距重算分组框。
++ [新增] `canvas_get_state` 支持 `mode:"summary"`、`types` / `bbox` 过滤与 `limit` / `offset` 分页。
++ [新增] Agent 每轮返回 `turnId`，`/api/agent/status` 可按会话查本轮状态；忙时 409 带当前 `turnId`。
++ [文档] 工具描述补充：`viewport` 是项目级单值，改动会影响正在看画布的人。
+
 ## 0.2.2 - 2026-11-26
 
 + [修复] Agent 输入框用中文输入法时，候选字浮层与默认提示文案重叠；组词/输入过程中隐藏提示文案。

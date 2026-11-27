@@ -101,8 +101,12 @@ try {
 
     const promptA = await post(`/api/projects/${PROJECT}/agent/conversations/${conversationA.id}/prompt`, { text: "只回复两个字：收到A" });
     check("对话 A 提交成功", promptA.status === 200, JSON.stringify(promptA.json).slice(0, 160));
+    check("prompt 返回 turnId", typeof promptA.json?.turnId === "string", JSON.stringify(promptA.json).slice(0, 160));
     const replyA = await waitAssistant(PROJECT, conversationA.id);
     check("对话 A 拿到回复", replyA.text.length > 0, replyA.text.slice(0, 60));
+    const statusAfterA = await api("/api/agent/status");
+    const runtimeA = statusAfterA.json?.sessions?.find((item) => item.conversationId === conversationA.id);
+    check("status 可查本轮 turn 状态", runtimeA?.lastTurn?.id === promptA.json?.turnId && runtimeA?.lastTurn?.status === "done", JSON.stringify(runtimeA?.lastTurn));
 
     const createdB = await post(`/api/projects/${PROJECT}/agent/conversations`, { title: "对话 B" });
     const conversationB = createdB.json?.conversation;
