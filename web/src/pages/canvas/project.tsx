@@ -1870,6 +1870,11 @@ function InfiniteCanvasPage() {
         setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, title } : node)));
     }, []);
 
+    // 必须稳定引用：内联箭头会击穿所有 CanvasNode 的 React.memo，让每次按键都全量重渲染画布
+    const handleTitleHover = useCallback((nodeId: string, active: boolean) => {
+        setTitleHoverNodeId((current) => (active ? nodeId : current === nodeId ? null : current));
+    }, []);
+
     const toggleBatchExpanded = useCallback((nodeId: string) => {
         setExpandedBatchNodeIds((current) => {
             const next = new Set(current);
@@ -3793,7 +3798,7 @@ function InfiniteCanvasPage() {
                             onSelectCapture={handleNodeSelectCapture}
                             onHoverStart={handleNodeHoverStart}
                             onHoverEnd={handleNodeHoverEnd}
-                            onTitleHover={(nodeId, active) => setTitleHoverNodeId((current) => (active ? nodeId : current === nodeId ? null : current))}
+                            onTitleHover={handleTitleHover}
                             onConnectStart={handleConnectStart}
                             onResizeStart={handleNodeResizeStart}
                             onResize={handleNodeResize}

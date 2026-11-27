@@ -32,6 +32,7 @@ export function AgentChatPromptInput({ value, disabled, placeholder, theme, onCh
     const [activeIndex, setActiveIndex] = useState(0);
     const [resourceCandidates, setResourceCandidates] = useState<CanvasResourceReference[]>([]);
     const [referenceHover, setReferenceHover] = useState<ReferenceHover | null>(null);
+    const [syncTick, setSyncTick] = useState(0);
 
     const tokens = useMemo(() => parseAgentInlineTokens(value, canvasReferences), [canvasReferences, value]);
     const selectedReferenceIds = useMemo(() => new Set(canvasReferences.map((item) => item.nodeId)), [canvasReferences]);
@@ -45,14 +46,20 @@ export function AgentChatPromptInput({ value, disabled, placeholder, theme, onCh
 
     useEffect(() => {
         const editor = editorRef.current;
-        if (!editor || document.activeElement === editor && value === lastEmittedRef.current) return;
+        if (!editor) return;
+        // 编辑中一律不重建 DOM：重建会把光标/选区打到开头，也会打断输入法组字；外部改动等失焦后再对齐
+        if (document.activeElement === editor) return;
+        if (serializeEditor(editor) === value) {
+            lastEmittedRef.current = value;
+            return;
+        }
         editor.replaceChildren(...tokens.map((token) => {
             if (token.type === "text") return document.createTextNode(token.value);
             if (token.type === "skill") return document.createTextNode("");
             return createReferenceToken(token.reference, theme);
         }));
         lastEmittedRef.current = value;
-    }, [theme, tokens, value]);
+    }, [theme, tokens, value, syncTick]);
 
     const emit = (next: string) => {
         lastEmittedRef.current = next;
@@ -185,6 +192,7 @@ export function AgentChatPromptInput({ value, disabled, placeholder, theme, onCh
                 onMouseLeave={() => setReferenceHover(null)}
                 onBlur={(event) => {
                     if (event.relatedTarget instanceof HTMLElement && event.relatedTarget.closest("[data-agent-command-menu]")) return;
+                    setSyncTick((tick) => tick + 1);
                     window.setTimeout(closeCommand, 120);
                 }}
             />

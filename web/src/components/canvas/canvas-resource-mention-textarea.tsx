@@ -1,4 +1,4 @@
-import { forwardRef, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent, PointerEvent, TextareaHTMLAttributes } from "react";
 import { createPortal } from "react-dom";
 import { FileText, Image as ImageIcon, Music2, Video } from "lucide-react";
@@ -29,6 +29,15 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
     const [mention, setMention] = useState<MentionState | null>(null);
     const [activeIndex, setActiveIndex] = useState(0);
     const [hasSelection, setHasSelection] = useState(false);
+    // 编辑期以本地草稿为准：组字/按键过程中不回写父级，避免受控 value 被外部渲染覆盖（输入法丢字、光标回跳）
+    const [draft, setDraft] = useState(value);
+    const focusedRef = useRef(false);
+    const composingRef = useRef(false);
+    const [syncTick, setSyncTick] = useState(0);
+    useEffect(() => {
+        if (focusedRef.current) return;
+        setDraft((current) => (current === value ? current : value));
+    }, [value, syncTick]);
     const candidates = useMemo(() => {
         if (!mention) return [];
         const query = mention.query.trim().toLowerCase();
@@ -39,6 +48,7 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
     const activeLabels = useMemo(() => (highlightLabels ? Array.from(new Set(references.filter((item) => item.active).map((item) => item.label))).sort((a, b) => b.length - a.length) : []), [highlightLabels, references]);
 
     const updateValue = (next: string, selectionStart?: number) => {
+        setDraft(next);
         onChange(next);
         if (typeof selectionStart !== "number") return;
         requestAnimationFrame(() => {
@@ -66,9 +76,9 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
     const insertReference = (reference: CanvasResourceReference) => {
         if (!mention) return;
         const textarea = textareaRef.current;
-        const end = textarea?.selectionStart ?? value.length;
+        const end = textarea?.selectionStart ?? draft.length;
         const insertText = `${reference.label} `;
-        const next = `${value.slice(0, mention.start)}${insertText}${value.slice(end)}`;
+        const next = `${draft.slice(0, mention.start)}${insertText}${draft.slice(end)}`;
         closeMention();
         updateValue(next, mention.start + insertText.length);
     };
@@ -99,7 +109,7 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
         <div className={`relative h-full w-full ${containerClassName || ""}`}>
             {showOverlay ? (
                 <div ref={overlayRef} className={`${className || ""} pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words`} style={{ ...style, color: theme.node.text }}>
-                    <MentionHighlightText value={value || props.placeholder?.toString() || ""} labels={activeLabels} placeholder={!value} />
+                    <MentionHighlightText value={draft || props.placeholder?.toString() || ""} labels={activeLabels} placeholder={!draft} />
                 </div>
             ) : null}
             <textarea
@@ -109,17 +119,40 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
                     if (typeof forwardedRef === "function") forwardedRef(node);
                     else if (forwardedRef) forwardedRef.current = node;
                 }}
-                value={value}
+                value={draft}
                 className={className}
                 style={mergedStyle}
                 onChange={(event) => {
                     const next = event.target.value;
-                    onChange(next);
+                    setDraft(next);
+                    if (!composingRef.current) onChange(next);
                     syncMention(next, event.target.selectionStart);
                     requestAnimationFrame(() => {
                         syncOverlayScroll();
                         updateSelectionState();
                     });
+                }}
+                onCompositionStart={(event) => {
+                    composingRef.current = true;
+                    props.onCompositionStart?.(event);
+                }}
+                onCompositionEnd={(event) => {
+                    composingRef.current = false;
+                    const next = event.currentTarget.value;
+                    setDraft(next);
+                    onChange(next);
+                    props.onCompositionEnd?.(event);
+                }}
+                onFocus={(event) => {
+                    focusedRef.current = true;
+                    props.onFocus?.(event);
+                }}
+                onBlur={(event) => {
+                    focusedRef.current = false;
+                    setSyncTick((tick) => tick + 1);
+                    setHasSelection(false);
+                    window.setTimeout(closeMention, 120);
+                    props.onBlur?.(event);
                 }}
                 onSelect={(event) => {
                     updateSelectionState();
@@ -141,7 +174,7 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
                     if ((event.key === "Backspace" || event.key === "Delete") && !mention) {
                         const el = textareaRef.current;
                         if (el && el.selectionStart === el.selectionEnd) {
-                            const result = deleteAdjacentLabel(value, el.selectionStart, event.key === "Backspace" ? "backward" : "forward", activeLabels);
+                            const result = deleteAdjacentLabel(draft, el.selectionStart, event.key === "Backspace" ? "backward" : "forward", activeLabels);
                             if (result) {
                                 event.preventDefault();
                                 updateValue(result.value, result.caret);
@@ -182,11 +215,6 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
                 onScroll={(event) => {
                     syncOverlayScroll();
                     props.onScroll?.(event);
-                }}
-                onBlur={(event) => {
-                    setHasSelection(false);
-                    window.setTimeout(closeMention, 120);
-                    props.onBlur?.(event);
                 }}
             />
             {menu}

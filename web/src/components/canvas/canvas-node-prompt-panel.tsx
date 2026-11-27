@@ -78,8 +78,8 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
         // 这时用 prompt 覆盖旧草稿，避免输入框/生成继续使用旧内容。
         const next = composerChanged && composerValue !== undefined ? composerValue : promptValue;
         if (isRunning || preservePromptRef.current) return;
-        const textarea = rootRef.current?.querySelector("textarea");
-        if (textarea && document.activeElement === textarea) return;
+        const field = rootRef.current?.querySelector("textarea, [contenteditable='true']");
+        if (field && document.activeElement === field) return;
         setPrompt((current) => (current === next ? current : next));
         if (promptChanged && !composerChanged && composerValue !== undefined) {
             onConfigChange(node.id, { composerContent: promptValue || undefined });

@@ -2,7 +2,7 @@
 // 交互:预览态 iframe 默认 pointer-events:none —— 鼠标事件穿透到宿主节点体,
 // 因此点节点任意位置都能拖动,无需在节点上加任何标题栏/按钮。
 // 「编辑/预览」与「交互」开关都放在节点外的悬浮工具条(toolbar 扩展点),状态存 metadata。
-import { definePlugin, useMemo, useRef, useState } from "@infinite-canvas/plugin-sdk";
+import { definePlugin, useEffect, useMemo, useRef, useState } from "@infinite-canvas/plugin-sdk";
 import type { CanvasNodeContentProps } from "@infinite-canvas/plugin-sdk";
 
 // 源码编辑器行高/字号,行号槽与文本域必须完全一致才能对齐
@@ -11,8 +11,15 @@ const EDITOR_LINE = 20;
 
 function HtmlEditor({ ctx, value }: { ctx: CanvasNodeContentProps["ctx"]; value: string }) {
     const gutterRef = useRef<HTMLDivElement>(null);
-    // 行数:按换行统计,至少 1 行;value 变化时重算
-    const lineCount = useMemo(() => Math.max(1, value.split("\n").length), [value]);
+    // 编辑期本地草稿：组字/按键过程中不回写宿主，避免父级重渲染覆盖输入框（输入法丢字、光标回跳）
+    const [draft, setDraft] = useState(value);
+    const focusedRef = useRef(false);
+    const composingRef = useRef(false);
+    useEffect(() => {
+        if (!focusedRef.current) setDraft(value);
+    }, [value]);
+    // 行数:按换行统计,至少 1 行;draft 变化时重算
+    const lineCount = useMemo(() => Math.max(1, draft.split("\n").length), [draft]);
     const [scrollTop, setScrollTop] = useState(0);
 
     const codeStyle = { fontFamily: "monospace", fontSize: EDITOR_FONT, lineHeight: `${EDITOR_LINE}px`, boxSizing: "border-box" } as const;
@@ -45,11 +52,32 @@ function HtmlEditor({ ctx, value }: { ctx: CanvasNodeContentProps["ctx"]; value:
             </div>
             <textarea
                 autoFocus
-                value={value}
+                value={draft}
                 placeholder="<div>Hello, {{input}}</div>"
                 spellCheck={false}
                 wrap="off"
-                onChange={(e) => ctx.updateMetadata({ content: e.target.value })}
+                onChange={(e) => {
+                    const next = e.target.value;
+                    setDraft(next);
+                    if (!composingRef.current) ctx.updateMetadata({ content: next });
+                }}
+                onCompositionStart={() => {
+                    composingRef.current = true;
+                }}
+                onCompositionEnd={(e) => {
+                    composingRef.current = false;
+                    const next = e.currentTarget.value;
+                    setDraft(next);
+                    ctx.updateMetadata({ content: next });
+                }}
+                onFocus={() => {
+                    focusedRef.current = true;
+                }}
+                onBlur={() => {
+                    focusedRef.current = false;
+                    // 失焦时确保宿主拿到最后一次输入（组字未触发 change 的兜底）
+                    if (draft !== value) ctx.updateMetadata({ content: draft });
+                }}
                 onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
                 onMouseDown={(e) => e.stopPropagation()}
                 onWheel={(e) => e.stopPropagation()}

@@ -43,6 +43,7 @@ export function CanvasPromptChipInput({ value, references, onChange, onSubmit, c
     const [mention, setMention] = useState<MentionState | null>(null);
     const [activeIndex, setActiveIndex] = useState(0);
     const [imagePreview, setImagePreview] = useState<string | null>(null);
+    const [syncTick, setSyncTick] = useState(0);
 
     const activeReferences = useMemo(() => references.filter((item) => item.active), [references]);
     const referenceByLabel = useMemo(() => new Map(activeReferences.map((item) => [item.label, item])), [activeReferences]);
@@ -62,7 +63,13 @@ export function CanvasPromptChipInput({ value, references, onChange, onSubmit, c
         const editor = editorRef.current;
         if (!editor) return;
         if (composingRef.current) return;
-        if (document.activeElement === editor && value === lastEmittedRef.current) return;
+        // 编辑中一律不重建 DOM：重建会把光标打到开头、也会打断输入法；外部改动等失焦后再对齐
+        if (document.activeElement === editor) return;
+        // DOM 已经和 value 一致时不碰它，避免无意义的重建（重挂载/重渲染都可能触发本 effect）
+        if (serializeEditor(editor) === value) {
+            lastEmittedRef.current = value;
+            return;
+        }
         editor.textContent = "";
         tokens.forEach((token) => {
             if (token.type === "text") {
@@ -74,7 +81,7 @@ export function CanvasPromptChipInput({ value, references, onChange, onSubmit, c
             else editor.append(document.createTextNode(token.label));
         });
         lastEmittedRef.current = value;
-    }, [tokens, referenceByLabel, theme, value]);
+    }, [tokens, referenceByLabel, theme, value, syncTick]);
 
     const emit = (next: string) => {
         lastEmittedRef.current = next;
@@ -193,7 +200,10 @@ export function CanvasPromptChipInput({ value, references, onChange, onSubmit, c
                     }
                     requestAnimationFrame(syncMention);
                 }}
-                onBlur={() => window.setTimeout(closeMention, 120)}
+                onBlur={() => {
+                    setSyncTick((tick) => tick + 1);
+                    window.setTimeout(closeMention, 120);
+                }}
             />
             {mention && candidates.length ? (
                 <MentionMenu rect={mention.rect} references={candidates} activeIndex={Math.min(activeIndex, candidates.length - 1)} theme={theme} onSelect={insertReference} />

@@ -67,12 +67,38 @@ function MarkdownPreview({ ctx }: CanvasNodeContentProps) {
 
 function MarkdownEditor({ ctx }: CanvasNodeContentProps) {
     const value = (ctx.node.metadata?.content as string | undefined) || "";
+    // 编辑期本地草稿：组字/按键过程中不回写宿主，避免父级重渲染覆盖输入框（输入法丢字、光标回跳）
+    const [draft, setDraft] = useState(value);
+    const focusedRef = useRef(false);
+    const composingRef = useRef(false);
+    useEffect(() => {
+        if (!focusedRef.current) setDraft(value);
+    }, [value]);
     return (
         <textarea
             autoFocus
-            value={value}
+            value={draft}
             placeholder="# 输入 Markdown"
-            onChange={(e) => ctx.updateMetadata({ content: e.target.value })}
+            onChange={(e) => {
+                const next = e.target.value;
+                setDraft(next);
+                if (!composingRef.current) ctx.updateMetadata({ content: next });
+            }}
+            onCompositionStart={() => {
+                composingRef.current = true;
+            }}
+            onCompositionEnd={(e) => {
+                composingRef.current = false;
+                const next = e.currentTarget.value;
+                setDraft(next);
+                ctx.updateMetadata({ content: next });
+            }}
+            onFocus={() => {
+                focusedRef.current = true;
+            }}
+            onBlur={() => {
+                focusedRef.current = false;
+            }}
             onMouseDown={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
             onWheel={(e) => e.stopPropagation()}

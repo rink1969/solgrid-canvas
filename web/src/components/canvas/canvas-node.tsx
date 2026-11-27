@@ -8,6 +8,7 @@ import { pickImageSource } from "@/lib/image-thumbnail";
 import { previewUrlFor, subscribeImagePreviews, getImagePreviewRevision } from "@/services/image-storage";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
 import { runErrorHint } from "@/lib/canvas/run-error-hint";
+import { isImeComposing } from "@/lib/keyboard-event";
 import { buildNodeContext } from "@/lib/canvas/plugin-node-context";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
@@ -163,6 +164,9 @@ export const CanvasNode = React.memo(function CanvasNode({
     const imageBorderColor = isActive ? selectionBlue : isRelated ? theme.node.muted : "transparent";
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const titleInputRef = useRef<HTMLInputElement>(null);
+    // 输入法组字期间/刚结束时的 Enter 是"选词"，不能当成"改完标题"
+    const titleComposingRef = useRef(false);
+    const titleCompositionEndRef = useRef(0);
     const resizeRef = useRef({
         isResizing: false,
         corner: "bottom-right" as ResizeCorner,
@@ -354,8 +358,16 @@ export const CanvasNode = React.memo(function CanvasNode({
                             className="h-6 max-w-full border-0 border-b border-dashed bg-transparent px-0 text-left text-xs font-medium outline-none"
                             style={{ borderColor: theme.node.muted, color: theme.node.text }}
                             onChange={(event) => setTitleDraft(event.target.value)}
+                            onCompositionStart={() => {
+                                titleComposingRef.current = true;
+                            }}
+                            onCompositionEnd={() => {
+                                titleComposingRef.current = false;
+                                titleCompositionEndRef.current = Date.now();
+                            }}
                             onBlur={finishTitleEditing}
                             onKeyDown={(event) => {
+                                if (isImeComposing(event) || titleComposingRef.current || Date.now() - titleCompositionEndRef.current < 120) return;
                                 if (event.key === "Enter") finishTitleEditing();
                                 if (event.key === "Escape") {
                                     setTitleDraft(data.title || "");

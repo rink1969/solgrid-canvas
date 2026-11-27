@@ -19,6 +19,13 @@ function StickyNoteContent({ ctx }: CanvasNodeContentProps) {
     const committedColor = (ctx.node.metadata?.pluginColor as string | undefined) || DEFAULT_COLOR;
     const color = draftColor ?? committedColor;
     const content = (ctx.node.metadata?.content as string | undefined) || "";
+    // 编辑期以本地草稿为准：组字/每次按键都不回写宿主，避免父级重渲染把 value 写回输入框（打断输入法、丢光标）
+    const [draft, setDraft] = useState(content);
+    const focusedRef = useRef(false);
+    const composingRef = useRef(false);
+    useEffect(() => {
+        if (!focusedRef.current) setDraft(content);
+    }, [content]);
 
     // 点击便利贴外部时:退出编辑并收起调色板。
     // 监听 pointerdown 的 capture 阶段:宿主画布在 pointerdown 上 preventDefault(会抑制
@@ -117,10 +124,29 @@ function StickyNoteContent({ ctx }: CanvasNodeContentProps) {
             {editing ? (
                 <textarea
                     autoFocus
-                    value={content}
+                    value={draft}
                     placeholder="输入便利贴内容…（点击别处或按 Esc 退出编辑）"
-                    onChange={(e) => ctx.updateMetadata({ content: e.target.value })}
-                    onBlur={() => setEditing(false)}
+                    onChange={(e) => {
+                        const next = e.target.value;
+                        setDraft(next);
+                        if (!composingRef.current) ctx.updateMetadata({ content: next });
+                    }}
+                    onCompositionStart={() => {
+                        composingRef.current = true;
+                    }}
+                    onCompositionEnd={(e) => {
+                        composingRef.current = false;
+                        const next = e.currentTarget.value;
+                        setDraft(next);
+                        ctx.updateMetadata({ content: next });
+                    }}
+                    onFocus={() => {
+                        focusedRef.current = true;
+                    }}
+                    onBlur={() => {
+                        focusedRef.current = false;
+                        setEditing(false);
+                    }}
                     onKeyDown={(e) => {
                         if (e.key === "Escape") {
                             e.stopPropagation();
